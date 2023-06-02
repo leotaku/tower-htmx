@@ -132,7 +132,7 @@ pin_project_lite::pin_project! {
     pub struct LolBody<'h, B> {
         #[pin]
         body: B,
-        rewriter: Option<SendRewriter<'h>>,
+        rewriter: Option<UnsafeSend<HtmlRewriter<'h, Sink>>>,
         sink: Sink,
     }
 }
@@ -142,7 +142,7 @@ impl<'h, B> LolBody<'h, B> {
         let sink = Sink::new();
         Self {
             body,
-            rewriter: Some(SendRewriter::new(settings, sink.clone())),
+            rewriter: Some(unsafe { UnsafeSend::new(HtmlRewriter::new(settings, sink.clone())) }),
             sink,
         }
     }
@@ -165,11 +165,16 @@ impl<'h, B: http_body::Body> http_body::Body for LolBody<'h, B> {
         if let Some(chunk) = poll {
             this.rewriter
                 .as_mut()
-                .map(|it| it.write(chunk.as_ref()))
+                .map(|it| it.0.get_mut().map(|it| it.write(chunk.as_ref())).unwrap())
                 .unwrap_or_else(|| Ok(()))
                 .map_err(EitherError::B)?;
         } else if let Some(rewriter) = this.rewriter.take() {
-            rewriter.end().map_err(EitherError::B)?;
+            rewriter
+                .0
+                .into_inner()
+                .unwrap()
+                .end()
+                .map_err(EitherError::B)?;
         }
 
         if let Some(chunk) = this.sink.pop() {
@@ -253,19 +258,3 @@ impl<T> UnsafeSend<T> {
 }
 
 unsafe impl<T> Send for UnsafeSend<T> {}
-
-struct SendRewriter<'h>(RwLock<HtmlRewriter<'h, Sink>>);
-
-unsafe impl<'h> Send for SendRewriter<'h> {}
-
-impl<'h> SendRewriter<'h> {
-    fn new<'s>(settings: Settings<'h, 's>, output_sink: Sink) -> Self {
-        SendRewriter(RwLock::new(HtmlRewriter::new(settings, output_sink)))
-    }
-    fn write(&mut self, data: &[u8]) -> Result<(), RewritingError> {
-        self.0.get_mut().map(|it| it.write(data)).unwrap()
-    }
-    fn end(self) -> Result<(), RewritingError> {
-        self.0.into_inner().map(|it| it.end()).unwrap()
-    }
-}
