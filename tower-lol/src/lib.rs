@@ -162,6 +162,10 @@ impl<'h, B: http_body::Body> http_body::Body for LolBody<'h, B> {
             .poll_data(cx)
             .map_ok(|mut chunk| chunk.copy_to_bytes(chunk.remaining()))?);
 
+        if this.rewriter.is_none() {
+            return Poll::Ready(Ok(poll).transpose());
+        }
+
         if let Some(chunk) = poll {
             this.rewriter
                 .as_mut()
