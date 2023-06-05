@@ -10,15 +10,15 @@ use http::{Request, Response};
 use lol_html::{errors::RewritingError, HtmlRewriter, Settings};
 use tower::{Layer, Service};
 
-type SettingsFn<'h, 's, ReqBody, S> = Arc<dyn Fn(&Request<ReqBody>, S) -> Settings<'h, 's> + Send + Sync>;
+type SettingsFn<'h, 's, ReqBody> = Arc<dyn Fn(&Request<ReqBody>) -> Settings<'h, 's> + Send + Sync>;
 
-pub struct LolLayer<'h, 's, ReqBody, S> {
-    settings: SettingsFn<'h, 's, ReqBody, S>,
+pub struct LolLayer<'h, 's, ReqBody> {
+    settings: SettingsFn<'h, 's, ReqBody>,
 }
 
-impl<'h, 's, ReqBody, S> LolLayer<'h, 's, ReqBody, S> {
+impl<'h, 's, ReqBody> LolLayer<'h, 's, ReqBody> {
     pub fn new(
-        settings: impl Fn(&Request<ReqBody>, S) -> Settings<'h, 's> + Send + Sync + 'static,
+        settings: impl Fn(&Request<ReqBody>) -> Settings<'h, 's> + Send + Sync + 'static,
     ) -> Self {
         Self {
             settings: Arc::new(settings),
@@ -26,7 +26,7 @@ impl<'h, 's, ReqBody, S> LolLayer<'h, 's, ReqBody, S> {
     }
 }
 
-impl<'h, 's, ReqBody, S> Clone for LolLayer<'h, 's, ReqBody, S> {
+impl<'h, 's, ReqBody> Clone for LolLayer<'h, 's, ReqBody> {
     fn clone(&self) -> Self {
         Self {
             settings: self.settings.clone(),
@@ -34,7 +34,7 @@ impl<'h, 's, ReqBody, S> Clone for LolLayer<'h, 's, ReqBody, S> {
     }
 }
 
-impl<'h, 's, S, ReqBody> Layer<S> for LolLayer<'h, 's, ReqBody, S> {
+impl<'h, 's, S, ReqBody> Layer<S> for LolLayer<'h, 's, ReqBody> {
     type Service = LolService<'h, 's, S, ReqBody>;
 
     fn layer(&self, inner: S) -> Self::Service {
@@ -44,7 +44,7 @@ impl<'h, 's, S, ReqBody> Layer<S> for LolLayer<'h, 's, ReqBody, S> {
 
 pub struct LolService<'h, 's, S, ReqBody> {
     inner: S,
-    settings: SettingsFn<'h, 's, ReqBody, S>,
+    settings: SettingsFn<'h, 's, ReqBody>,
 }
 
 impl<'h, 's, S: Clone, ReqBody> Clone for LolService<'h, 's, S, ReqBody> {
@@ -59,7 +59,7 @@ impl<'h, 's, S: Clone, ReqBody> Clone for LolService<'h, 's, S, ReqBody> {
 impl<'h, 's, 'c, S, ReqBody> LolService<'h, 's, S, ReqBody> {
     pub fn new(
         inner: S,
-        settings: impl Fn(&Request<ReqBody>, S) -> Settings<'h, 's> + Send + Sync + 'static,
+        settings: impl Fn(&Request<ReqBody>) -> Settings<'h, 's> + Send + Sync + 'static,
     ) -> Self {
         Self {
             inner,
@@ -67,14 +67,14 @@ impl<'h, 's, 'c, S, ReqBody> LolService<'h, 's, S, ReqBody> {
         }
     }
 
-    fn new_from_layer(inner: S, settings: SettingsFn<'h, 's, ReqBody, S>) -> Self {
+    fn new_from_layer(inner: S, settings: SettingsFn<'h, 's, ReqBody>) -> Self {
         Self { inner, settings }
     }
 }
 
 impl<'h, 's, 'c, S, ReqBody, ResBody> Service<Request<ReqBody>> for LolService<'h, 's, S, ReqBody>
 where
-    S: Service<Request<ReqBody>, Response = Response<ResBody>> + Clone,
+    S: Service<Request<ReqBody>, Response = Response<ResBody>>,
     ResBody: http_body::Body,
 {
     type Response = Response<LolBody<'h, ResBody>>;
@@ -86,8 +86,7 @@ where
     }
 
     fn call(&mut self, request: Request<ReqBody>) -> Self::Future {
-        let old = std::mem::replace(self, self.clone());
-        let settings = (self.settings)(&request, old.inner);
+        let settings = (self.settings)(&request);
         LolFuture {
             inner: self.inner.call(request),
             settings: Some(unsafe { UnsafeSend::new(settings) }),
@@ -103,7 +102,7 @@ pin_project_lite::pin_project! {
     }
 }
 
-impl<'h, 's, 'a, PB, PE, F> Future for LolFuture<'h, 's, F>
+impl<'h, 's, PB, PE, F> Future for LolFuture<'h, 's, F>
 where
     F: Future<Output = Result<Response<PB>, PE>>,
 {
