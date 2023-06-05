@@ -1,5 +1,6 @@
+use crate::either::EitherError;
+
 use std::{
-    fmt::Display,
     future::Future,
     sync::{Arc, RwLock},
     task::{ready, Poll},
@@ -12,11 +13,11 @@ use tower::{Layer, Service};
 
 type SettingsFn<'h, 's, ReqBody> = Arc<dyn Fn(&Request<ReqBody>) -> Settings<'h, 's> + Send + Sync>;
 
-pub struct LolLayer<'h, 's, ReqBody> {
+pub struct HtmlRewriteLayer<'h, 's, ReqBody> {
     settings: SettingsFn<'h, 's, ReqBody>,
 }
 
-impl<'h, 's, ReqBody> LolLayer<'h, 's, ReqBody> {
+impl<'h, 's, ReqBody> HtmlRewriteLayer<'h, 's, ReqBody> {
     pub fn new(
         settings: impl Fn(&Request<ReqBody>) -> Settings<'h, 's> + Send + Sync + 'static,
     ) -> Self {
@@ -26,7 +27,7 @@ impl<'h, 's, ReqBody> LolLayer<'h, 's, ReqBody> {
     }
 }
 
-impl<'h, 's, ReqBody> Clone for LolLayer<'h, 's, ReqBody> {
+impl<'h, 's, ReqBody> Clone for HtmlRewriteLayer<'h, 's, ReqBody> {
     fn clone(&self) -> Self {
         Self {
             settings: self.settings.clone(),
@@ -34,20 +35,20 @@ impl<'h, 's, ReqBody> Clone for LolLayer<'h, 's, ReqBody> {
     }
 }
 
-impl<'h, 's, S, ReqBody> Layer<S> for LolLayer<'h, 's, ReqBody> {
-    type Service = LolService<'h, 's, S, ReqBody>;
+impl<'h, 's, S, ReqBody> Layer<S> for HtmlRewriteLayer<'h, 's, ReqBody> {
+    type Service = HtmlRewriteService<'h, 's, S, ReqBody>;
 
     fn layer(&self, inner: S) -> Self::Service {
         Self::Service::new_from_layer(inner, self.settings.clone())
     }
 }
 
-pub struct LolService<'h, 's, S, ReqBody> {
+pub struct HtmlRewriteService<'h, 's, S, ReqBody> {
     inner: S,
     settings: SettingsFn<'h, 's, ReqBody>,
 }
 
-impl<'h, 's, S: Clone, ReqBody> Clone for LolService<'h, 's, S, ReqBody> {
+impl<'h, 's, S: Clone, ReqBody> Clone for HtmlRewriteService<'h, 's, S, ReqBody> {
     fn clone(&self) -> Self {
         Self {
             inner: self.inner.clone(),
@@ -56,7 +57,7 @@ impl<'h, 's, S: Clone, ReqBody> Clone for LolService<'h, 's, S, ReqBody> {
     }
 }
 
-impl<'h, 's, 'c, S, ReqBody> LolService<'h, 's, S, ReqBody> {
+impl<'h, 's, 'c, S, ReqBody> HtmlRewriteService<'h, 's, S, ReqBody> {
     pub fn new(
         inner: S,
         settings: impl Fn(&Request<ReqBody>) -> Settings<'h, 's> + Send + Sync + 'static,
@@ -72,14 +73,14 @@ impl<'h, 's, 'c, S, ReqBody> LolService<'h, 's, S, ReqBody> {
     }
 }
 
-impl<'h, 's, 'c, S, ReqBody, ResBody> Service<Request<ReqBody>> for LolService<'h, 's, S, ReqBody>
+impl<'h, 's, 'c, S, ReqBody, ResBody> Service<Request<ReqBody>> for HtmlRewriteService<'h, 's, S, ReqBody>
 where
     S: Service<Request<ReqBody>, Response = Response<ResBody>>,
     ResBody: http_body::Body,
 {
-    type Response = Response<LolBody<'h, ResBody>>;
+    type Response = Response<HtmlRewriteBody<'h, ResBody>>;
     type Error = S::Error;
-    type Future = LolFuture<'h, 's, S::Future>;
+    type Future = HtmlRewriteFuture<'h, 's, S::Future>;
 
     fn poll_ready(&mut self, cx: &mut std::task::Context<'_>) -> Poll<Result<(), Self::Error>> {
         self.inner.poll_ready(cx)
@@ -87,7 +88,7 @@ where
 
     fn call(&mut self, request: Request<ReqBody>) -> Self::Future {
         let settings = (self.settings)(&request);
-        LolFuture {
+        HtmlRewriteFuture {
             inner: self.inner.call(request),
             settings: Some(unsafe { UnsafeSend::new(settings) }),
         }
@@ -95,18 +96,18 @@ where
 }
 
 pin_project_lite::pin_project! {
-    pub struct LolFuture<'h, 's, F> {
+    pub struct HtmlRewriteFuture<'h, 's, F> {
         #[pin]
         inner: F,
         settings: Option<UnsafeSend<Settings<'h, 's>>>,
     }
 }
 
-impl<'h, 's, PB, PE, F> Future for LolFuture<'h, 's, F>
+impl<'h, 's, PB, PE, F> Future for HtmlRewriteFuture<'h, 's, F>
 where
     F: Future<Output = Result<Response<PB>, PE>>,
 {
-    type Output = Result<Response<LolBody<'h, PB>>, PE>;
+    type Output = Result<Response<HtmlRewriteBody<'h, PB>>, PE>;
 
     fn poll(self: std::pin::Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> Poll<Self::Output> {
         let this = self.project();
@@ -114,7 +115,7 @@ where
 
         let (parts, body) = response.into_parts();
 
-        let new_body = LolBody::new(
+        let new_body = HtmlRewriteBody::new(
             body,
             this.settings
                 .take()
@@ -129,7 +130,7 @@ where
 }
 
 pin_project_lite::pin_project! {
-    pub struct LolBody<'h, B> {
+    pub struct HtmlRewriteBody<'h, B> {
         #[pin]
         body: B,
         rewriter: Option<UnsafeSend<HtmlRewriter<'h, Sink>>>,
@@ -137,7 +138,7 @@ pin_project_lite::pin_project! {
     }
 }
 
-impl<'h, B> LolBody<'h, B> {
+impl<'h, B> HtmlRewriteBody<'h, B> {
     fn new<'s>(body: B, settings: Settings<'h, 's>) -> Self {
         let sink = Sink::new();
         Self {
@@ -148,7 +149,7 @@ impl<'h, B> LolBody<'h, B> {
     }
 }
 
-impl<'h, B: http_body::Body> http_body::Body for LolBody<'h, B> {
+impl<'h, B: http_body::Body> http_body::Body for HtmlRewriteBody<'h, B> {
     type Data = Bytes;
     type Error = EitherError<B::Error, RewritingError>;
 
@@ -226,29 +227,6 @@ impl lol_html::OutputSink for Sink {
     fn handle_chunk(&mut self, chunk: &[u8]) {
         if let Ok(mut buffer) = self.chunk_buffer.try_write() {
             buffer.push(Bytes::copy_from_slice(chunk));
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
-pub enum EitherError<A, B> {
-    A(A),
-    B(B),
-}
-
-impl<A, B> From<A> for EitherError<A, B> {
-    fn from(value: A) -> Self {
-        EitherError::A(value)
-    }
-}
-
-impl<A: std::error::Error, B: std::error::Error> std::error::Error for EitherError<A, B> {}
-
-impl<A: Display, B: Display> Display for EitherError<A, B> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            EitherError::A(a) => a.fmt(f),
-            EitherError::B(b) => b.fmt(f),
         }
     }
 }
