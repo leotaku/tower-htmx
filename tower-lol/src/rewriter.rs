@@ -13,11 +13,11 @@ use tower::{Layer, Service};
 
 type SettingsFn<'h, 's, ReqBody> = Arc<dyn Fn(&Request<ReqBody>) -> Settings<'h, 's> + Send + Sync>;
 
-pub struct HtmlRewriteLayer<'h, 's, ReqBody> {
+pub struct HtmlRewriterLayer<'h, 's, ReqBody> {
     settings: SettingsFn<'h, 's, ReqBody>,
 }
 
-impl<'h, 's, ReqBody> HtmlRewriteLayer<'h, 's, ReqBody> {
+impl<'h, 's, ReqBody> HtmlRewriterLayer<'h, 's, ReqBody> {
     pub fn new(
         settings: impl Fn(&Request<ReqBody>) -> Settings<'h, 's> + Send + Sync + 'static,
     ) -> Self {
@@ -27,7 +27,7 @@ impl<'h, 's, ReqBody> HtmlRewriteLayer<'h, 's, ReqBody> {
     }
 }
 
-impl<'h, 's, ReqBody> Clone for HtmlRewriteLayer<'h, 's, ReqBody> {
+impl<'h, 's, ReqBody> Clone for HtmlRewriterLayer<'h, 's, ReqBody> {
     fn clone(&self) -> Self {
         Self {
             settings: self.settings.clone(),
@@ -35,20 +35,20 @@ impl<'h, 's, ReqBody> Clone for HtmlRewriteLayer<'h, 's, ReqBody> {
     }
 }
 
-impl<'h, 's, S, ReqBody> Layer<S> for HtmlRewriteLayer<'h, 's, ReqBody> {
-    type Service = HtmlRewriteService<'h, 's, S, ReqBody>;
+impl<'h, 's, S, ReqBody> Layer<S> for HtmlRewriterLayer<'h, 's, ReqBody> {
+    type Service = HtmlRewriterService<'h, 's, S, ReqBody>;
 
     fn layer(&self, inner: S) -> Self::Service {
         Self::Service::new_from_layer(inner, self.settings.clone())
     }
 }
 
-pub struct HtmlRewriteService<'h, 's, S, ReqBody> {
+pub struct HtmlRewriterService<'h, 's, S, ReqBody> {
     inner: S,
     settings: SettingsFn<'h, 's, ReqBody>,
 }
 
-impl<'h, 's, S: Clone, ReqBody> Clone for HtmlRewriteService<'h, 's, S, ReqBody> {
+impl<'h, 's, S: Clone, ReqBody> Clone for HtmlRewriterService<'h, 's, S, ReqBody> {
     fn clone(&self) -> Self {
         Self {
             inner: self.inner.clone(),
@@ -57,7 +57,7 @@ impl<'h, 's, S: Clone, ReqBody> Clone for HtmlRewriteService<'h, 's, S, ReqBody>
     }
 }
 
-impl<'h, 's, 'c, S, ReqBody> HtmlRewriteService<'h, 's, S, ReqBody> {
+impl<'h, 's, 'c, S, ReqBody> HtmlRewriterService<'h, 's, S, ReqBody> {
     pub fn new(
         inner: S,
         settings: impl Fn(&Request<ReqBody>) -> Settings<'h, 's> + Send + Sync + 'static,
@@ -73,14 +73,15 @@ impl<'h, 's, 'c, S, ReqBody> HtmlRewriteService<'h, 's, S, ReqBody> {
     }
 }
 
-impl<'h, 's, 'c, S, ReqBody, ResBody> Service<Request<ReqBody>> for HtmlRewriteService<'h, 's, S, ReqBody>
+impl<'h, 's, 'c, S, ReqBody, ResBody> Service<Request<ReqBody>>
+    for HtmlRewriterService<'h, 's, S, ReqBody>
 where
     S: Service<Request<ReqBody>, Response = Response<ResBody>>,
     ResBody: http_body::Body,
 {
-    type Response = Response<HtmlRewriteBody<'h, ResBody>>;
+    type Response = Response<HtmlRewriterBody<'h, ResBody>>;
     type Error = S::Error;
-    type Future = HtmlRewriteFuture<'h, 's, S::Future>;
+    type Future = HtmlRewriterFuture<'h, 's, S::Future>;
 
     fn poll_ready(&mut self, cx: &mut std::task::Context<'_>) -> Poll<Result<(), Self::Error>> {
         self.inner.poll_ready(cx)
@@ -88,7 +89,7 @@ where
 
     fn call(&mut self, request: Request<ReqBody>) -> Self::Future {
         let settings = (self.settings)(&request);
-        HtmlRewriteFuture {
+        HtmlRewriterFuture {
             inner: self.inner.call(request),
             settings: Some(unsafe { UnsafeSend::new(settings) }),
         }
@@ -96,18 +97,18 @@ where
 }
 
 pin_project_lite::pin_project! {
-    pub struct HtmlRewriteFuture<'h, 's, F> {
+    pub struct HtmlRewriterFuture<'h, 's, F> {
         #[pin]
         inner: F,
         settings: Option<UnsafeSend<Settings<'h, 's>>>,
     }
 }
 
-impl<'h, 's, PB, PE, F> Future for HtmlRewriteFuture<'h, 's, F>
+impl<'h, 's, PB, PE, F> Future for HtmlRewriterFuture<'h, 's, F>
 where
     F: Future<Output = Result<Response<PB>, PE>>,
 {
-    type Output = Result<Response<HtmlRewriteBody<'h, PB>>, PE>;
+    type Output = Result<Response<HtmlRewriterBody<'h, PB>>, PE>;
 
     fn poll(self: std::pin::Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> Poll<Self::Output> {
         let this = self.project();
@@ -115,7 +116,7 @@ where
 
         let (parts, body) = response.into_parts();
 
-        let new_body = HtmlRewriteBody::new(
+        let new_body = HtmlRewriterBody::new(
             body,
             this.settings
                 .take()
@@ -130,7 +131,7 @@ where
 }
 
 pin_project_lite::pin_project! {
-    pub struct HtmlRewriteBody<'h, B> {
+    pub struct HtmlRewriterBody<'h, B> {
         #[pin]
         body: B,
         rewriter: Option<UnsafeSend<HtmlRewriter<'h, Sink>>>,
@@ -138,7 +139,7 @@ pin_project_lite::pin_project! {
     }
 }
 
-impl<'h, B> HtmlRewriteBody<'h, B> {
+impl<'h, B> HtmlRewriterBody<'h, B> {
     fn new<'s>(body: B, settings: Settings<'h, 's>) -> Self {
         let sink = Sink::new();
         Self {
@@ -149,7 +150,7 @@ impl<'h, B> HtmlRewriteBody<'h, B> {
     }
 }
 
-impl<'h, B: http_body::Body> http_body::Body for HtmlRewriteBody<'h, B> {
+impl<'h, B: http_body::Body> http_body::Body for HtmlRewriterBody<'h, B> {
     type Data = Bytes;
     type Error = EitherError<B::Error, RewritingError>;
 
