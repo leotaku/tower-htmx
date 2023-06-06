@@ -57,7 +57,7 @@ impl<'h, 's, S: Clone, ReqBody> Clone for HtmlRewriterService<'h, 's, S, ReqBody
     }
 }
 
-impl<'h, 's, 'c, S, ReqBody> HtmlRewriterService<'h, 's, S, ReqBody> {
+impl<'h, 's, S, ReqBody> HtmlRewriterService<'h, 's, S, ReqBody> {
     pub fn new(
         inner: S,
         settings: impl Fn(&Request<ReqBody>) -> Settings<'h, 's> + Send + Sync + 'static,
@@ -73,7 +73,7 @@ impl<'h, 's, 'c, S, ReqBody> HtmlRewriterService<'h, 's, S, ReqBody> {
     }
 }
 
-impl<'h, 's, 'c, S, ReqBody, ResBody> Service<Request<ReqBody>>
+impl<'h, 's, S, ReqBody, ResBody> Service<Request<ReqBody>>
     for HtmlRewriterService<'h, 's, S, ReqBody>
 where
     S: Service<Request<ReqBody>, Response = Response<ResBody>>,
