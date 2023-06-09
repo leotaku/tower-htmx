@@ -121,9 +121,7 @@ where
             this.settings
                 .take()
                 .expect("poll to not be called on completed futures")
-                .0
-                .into_inner()
-                .unwrap(),
+                .0,
         );
 
         Poll::Ready(Ok(Response::from_parts(parts, new_body)))
@@ -162,7 +160,8 @@ impl<'h, B: http_body::Body> http_body::Body for HtmlRewriterBody<'h, B> {
         let poll = ready!(this
             .body
             .poll_data(cx)
-            .map_ok(|mut chunk| chunk.copy_to_bytes(chunk.remaining()))?);
+            .map_ok(|mut chunk| chunk.copy_to_bytes(chunk.remaining()))
+            .map_err(EitherError::A)?);
 
         if this.rewriter.is_none() {
             return Poll::Ready(Ok(poll).transpose());
@@ -171,16 +170,12 @@ impl<'h, B: http_body::Body> http_body::Body for HtmlRewriterBody<'h, B> {
         if let Some(chunk) = poll {
             this.rewriter
                 .as_mut()
-                .map(|it| it.0.get_mut().map(|it| it.write(chunk.as_ref())).unwrap())
-                .unwrap_or_else(|| Ok(()))
+                .unwrap()
+                .0
+                .write(chunk.as_ref())
                 .map_err(EitherError::B)?;
         } else if let Some(rewriter) = this.rewriter.take() {
-            rewriter
-                .0
-                .into_inner()
-                .unwrap()
-                .end()
-                .map_err(EitherError::B)?;
+            rewriter.0.end().map_err(EitherError::B)?;
         }
 
         if let Some(chunk) = this.sink.pop() {
@@ -232,11 +227,11 @@ impl lol_html::OutputSink for Sink {
     }
 }
 
-struct UnsafeSend<T>(RwLock<T>);
+struct UnsafeSend<T>(T);
 
 impl<T> UnsafeSend<T> {
     unsafe fn new(value: T) -> Self {
-        Self(RwLock::new(value))
+        Self(value)
     }
 }
 
