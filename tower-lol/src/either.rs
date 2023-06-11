@@ -1,10 +1,54 @@
-use std::{
-    error::Error,
-    fmt::Display,
-    future::Future,
-    pin::Pin,
-    task::{ready, Context, Poll},
-};
+use std::{error::Error, fmt::Display};
+
+use bytes::Buf;
+
+pin_project_lite::pin_project! {
+    #[project = EitherBodyProj]
+    pub enum EitherBody<A, B> {
+        A{ #[pin] a: A },
+        B{ #[pin] b: B },
+    }
+}
+
+impl<A, B> EitherBody<A, B> {
+    pub fn a(a: A) -> Self {
+        Self::A { a }
+    }
+
+    pub fn b(b: B) -> Self {
+        Self::B { b }
+    }
+}
+
+impl<A, B, D, EA, EB> http_body::Body for EitherBody<A, B>
+where
+    A: http_body::Body<Data = D, Error = EA>,
+    B: http_body::Body<Data = D, Error = EB>,
+    D: Buf,
+{
+    type Data = D;
+    type Error = EitherError<A::Error, B::Error>;
+
+    fn poll_data(
+        self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Option<Result<Self::Data, Self::Error>>> {
+        match self.project() {
+            EitherBodyProj::A { a } => a.poll_data(cx).map_err(EitherError::A),
+            EitherBodyProj::B { b } => b.poll_data(cx).map_err(EitherError::B),
+        }
+    }
+
+    fn poll_trailers(
+        self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Result<Option<http::HeaderMap>, Self::Error>> {
+        match self.project() {
+            EitherBodyProj::A { a } => a.poll_trailers(cx).map_err(EitherError::A),
+            EitherBodyProj::B { b } => b.poll_trailers(cx).map_err(EitherError::B),
+        }
+    }
+}
 
 #[derive(Debug, Clone)]
 pub enum EitherError<A, B> {
@@ -20,42 +64,5 @@ impl<A: Display, B: Display> Display for EitherError<A, B> {
             EitherError::A(a) => a.fmt(f),
             EitherError::B(b) => b.fmt(f),
         }
-    }
-}
-
-pin_project_lite::pin_project! {
-    pub struct StoringFuture<O, F> {
-        #[pin] future: F,
-        output: Option<O>,
-    }
-}
-
-impl<O, F> Future for StoringFuture<O, F>
-where
-    F: Future<Output = O>,
-{
-    type Output = ();
-
-    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        let this = self.project();
-        if this.output.is_none() {
-            let output = ready!(this.future.poll(cx));
-            *this.output = Some(output);
-        };
-
-        Poll::Ready(())
-    }
-}
-
-impl<O, F> StoringFuture<O, F> {
-    pub fn new(future: F) -> Self {
-        Self {
-            future,
-            output: None,
-        }
-    }
-
-    pub fn take(self: Pin<&mut Self>) -> O {
-        self.project().output.take().unwrap()
     }
 }

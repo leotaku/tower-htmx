@@ -1,14 +1,17 @@
-use crate::either::{EitherError, StoringFuture};
+use crate::{
+    either::EitherBody,
+    util::{ErrorBody, UnsafeSend},
+};
 
 use std::{
     future::Future,
     pin::Pin,
-    sync::{Arc, RwLock},
-    task::{ready, Context, Poll},
+    task::{Context, Poll},
 };
 
-use bytes::{Buf, Bytes};
-use http::{Request, Response};
+use bytes::{Buf, Bytes, BytesMut};
+use http::{header::Entry, uri::PathAndQuery, Request, Response};
+use http_body::{Body, Full};
 use lol_html::{errors::RewritingError, HtmlRewriter, Settings};
 use tower::{Layer, Service};
 
@@ -16,21 +19,52 @@ pub struct HtmlRewriterLayer<Sett> {
     settings: Sett,
 }
 
-pub trait SettingsProvider<B>: Send + Sync + Clone {
-    type Future: Future<Output = Option<Settings<'static, 'static>>>;
-
-    fn provide(&self, req: &Request<B>) -> Self::Future;
+pub trait SettingsProvider<ReqBody, ResBody> {
+    fn set_request(&mut self, req: &Request<ReqBody>);
+    fn provide<'b, 'a: 'b>(
+        &mut self,
+        res: &'a mut Response<ResBody>,
+    ) -> Option<Settings<'b, 'static>>;
 }
 
-impl<F, Fut, B> SettingsProvider<B> for F
-where
-    F: Fn(&Request<B>) -> Fut + Send + Sync + Clone,
-    Fut: Future<Output = Option<Settings<'static, 'static>>>,
-{
-    type Future = Fut;
+fn provide_settings<'b, 'a: 'b, ReqBody, ResBody, S: SettingsProvider<ReqBody, ResBody>>(
+    settings: &mut S,
+    res: &'a mut Response<ResBody>,
+) -> Option<UnsafeSend<Settings<'b, 'static>>> {
+    settings
+        .provide(res)
+        .map(|it| unsafe { UnsafeSend::new(it) })
+}
 
-    fn provide(&self, req: &Request<B>) -> Self::Future {
-        self(req)
+#[derive(Debug, Clone)]
+pub struct SettingsFromQuery<F> {
+    query: Option<PathAndQuery>,
+    function: F,
+}
+
+impl<F> SettingsFromQuery<F> {
+    pub fn new(function: F) -> Self {
+        Self {
+            query: None,
+            function,
+        }
+    }
+}
+
+impl<F, ReqBody, ResBody> SettingsProvider<ReqBody, ResBody> for SettingsFromQuery<F>
+where
+    F: Fn(&PathAndQuery, &mut Response<ResBody>) -> Option<Settings<'static, 'static>> + Copy,
+{
+    fn set_request(&mut self, req: &Request<ReqBody>) {
+        self.query = req.uri().path_and_query().cloned();
+    }
+
+    fn provide<'b, 'a: 'b>(
+        &mut self,
+        res: &'a mut Response<ResBody>,
+    ) -> Option<Settings<'b, 'static>> {
+        let f = self.function;
+        f(self.query.as_mut().unwrap(), res)
     }
 }
 
@@ -76,177 +110,77 @@ impl<S, Sett> HtmlRewriterService<S, Sett> {
     }
 }
 
+type TriBody<A, B, C> = EitherBody<A, EitherBody<B, C>>;
+
 impl<S, Sett, ReqBody, ResBody> Service<Request<ReqBody>> for HtmlRewriterService<S, Sett>
 where
-    S: Service<Request<ReqBody>, Response = Response<ResBody>>,
-    ResBody: http_body::Body,
-    Sett: SettingsProvider<ReqBody>,
+    S: Service<Request<ReqBody>, Response = Response<ResBody>> + Clone + Send + 'static,
+    S::Future: Send,
+    Sett: SettingsProvider<ReqBody, ResBody> + Clone + Send + 'static,
+    ResBody: Body + Unpin + Send,
+    ReqBody: Send + 'static,
 {
-    type Response = Response<HtmlRewriterBody<ResBody>>;
+    type Response = Response<TriBody<Full<Bytes>, ResBody, ErrorBody<Bytes, RewritingError>>>;
     type Error = S::Error;
-    type Future = HtmlRewriterFuture<S::Future, Sett::Future, <S::Future as Future>::Output>;
+    type Future = Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send>>;
 
     fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         self.inner.poll_ready(cx)
     }
 
-    fn call(&mut self, request: Request<ReqBody>) -> Self::Future {
-        let settings = self.settings.provide(&request);
-        HtmlRewriterFuture {
-            inner: StoringFuture::new(self.inner.call(request)),
-            settings,
-        }
+    fn call(&mut self, req: Request<ReqBody>) -> Self::Future {
+        let mut cloned = self.clone();
+
+        Box::pin(async move {
+            std::future::poll_fn(|cx| cloned.poll_ready(cx)).await?;
+            cloned.settings.set_request(&req);
+
+            let mut response: Response<_> = cloned.inner.call(req).await?;
+
+            let settings = match provide_settings(&mut cloned.settings, &mut response) {
+                Some(settings) => settings,
+                None => return Ok(response.map(|body| EitherBody::b(EitherBody::a(body)))),
+            };
+
+            let (mut parts, body) = response.into_parts();
+            let output = match handle_rewrite(settings, body).await {
+                Ok(output) => output,
+                Err(error) => {
+                    return Ok(Response::from_parts(
+                        parts,
+                        EitherBody::b(EitherBody::b(ErrorBody::new(error))),
+                    ))
+                }
+            };
+
+            if let Entry::Occupied(mut entry) = parts.headers.entry(http::header::CONTENT_LENGTH) {
+                entry.insert(output.len().into());
+            }
+
+            Ok(Response::from_parts(
+                parts,
+                EitherBody::a(Full::new(output.into())),
+            ))
+        })
     }
 }
 
-pin_project_lite::pin_project! {
-    pub struct HtmlRewriterFuture<F, Sett, FO> {
-        #[pin]
-        inner: StoringFuture<FO, F>,
-        #[pin]
-        settings: Sett,
+async fn handle_rewrite<B: http_body::Body + Unpin>(
+    settings: UnsafeSend<Settings<'static, 'static>>,
+    mut body: B,
+) -> Result<BytesMut, RewritingError> {
+    let mut output = BytesMut::new();
+    let mut rewriter = unsafe {
+        UnsafeSend::new(HtmlRewriter::new(settings.inner, |chunk: &[u8]| {
+            output.extend_from_slice(chunk)
+        }))
+    };
+
+    while let Some(chunk) = body.data().await.transpose().unwrap_or_else(|_| panic!()) {
+        rewriter.inner.write(chunk.chunk())?
     }
+
+    rewriter.inner.end()?;
+
+    Ok(output)
 }
-
-impl<PB, PE, F, Sett> Future for HtmlRewriterFuture<F, Sett, Result<Response<PB>, PE>>
-where
-    F: Future<Output = Result<Response<PB>, PE>>,
-    Sett: Future<Output = Option<Settings<'static, 'static>>>,
-{
-    type Output = Result<Response<HtmlRewriterBody<PB>>, PE>;
-
-    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        let mut this = self.project();
-
-        ready!(this.inner.as_mut().poll(cx));
-        let settings = ready!(this.settings.poll(cx));
-        let response = this.inner.take()?;
-
-        let (parts, body) = response.into_parts();
-
-        let new_body = match settings {
-            Some(settings) => HtmlRewriterBody::new(body, settings),
-            None => HtmlRewriterBody::passthrough(body),
-        };
-
-        Poll::Ready(Ok(Response::from_parts(parts, new_body)))
-    }
-}
-
-pin_project_lite::pin_project! {
-    pub struct HtmlRewriterBody<B> {
-        #[pin]
-        body: B,
-        rewriter: Option<UnsafeSend<HtmlRewriter<'static, Sink>>>,
-        sink: Sink,
-    }
-}
-
-impl<B> HtmlRewriterBody<B> {
-    fn new(body: B, settings: Settings<'static, 'static>) -> Self {
-        let sink = Sink::new();
-        Self {
-            body,
-            rewriter: Some(unsafe { UnsafeSend::new(HtmlRewriter::new(settings, sink.clone())) }),
-            sink,
-        }
-    }
-
-    fn passthrough(body: B) -> Self {
-        Self {
-            body,
-            rewriter: None,
-            sink: Sink::new(),
-        }
-    }
-}
-
-impl<B: http_body::Body> http_body::Body for HtmlRewriterBody<B> {
-    type Data = Bytes;
-    type Error = EitherError<B::Error, RewritingError>;
-
-    fn poll_data(
-        self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
-    ) -> Poll<Option<Result<Self::Data, Self::Error>>> {
-        println!("poll_data");
-        let this = self.project();
-        let chunk = ready!(this
-            .body
-            .poll_data(cx)
-            .map_ok(|mut chunk| chunk.copy_to_bytes(chunk.remaining()))
-            .map_err(EitherError::A)?);
-
-        if this.rewriter.is_none() {
-            return Poll::Ready(Ok(chunk).transpose());
-        }
-
-        if let Some(chunk) = chunk {
-            this.rewriter
-                .as_mut()
-                .unwrap()
-                .0
-                .write(chunk.as_ref())
-                .map_err(EitherError::B)?;
-        } else if let Some(rewriter) = this.rewriter.take() {
-            rewriter.0.end().map_err(EitherError::B)?;
-        }
-
-        if let Some(chunk) = this.sink.pop() {
-            Poll::Ready(Some(Ok(chunk)))
-        } else if this.rewriter.is_some() {
-            Poll::Pending
-        } else {
-            Poll::Ready(None)
-        }
-    }
-
-    fn poll_trailers(
-        self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
-    ) -> Poll<Result<Option<http::HeaderMap>, Self::Error>> {
-        self.project()
-            .body
-            .poll_trailers(cx)
-            .map(|it| it.map_err(EitherError::A))
-    }
-}
-
-#[derive(Clone)]
-struct Sink {
-    chunk_buffer: Arc<RwLock<Vec<Bytes>>>,
-}
-
-impl Sink {
-    fn new() -> Self {
-        Self {
-            chunk_buffer: Arc::new(RwLock::new(Vec::new())),
-        }
-    }
-
-    fn pop(&self) -> Option<Bytes> {
-        if let Ok(mut buffer) = self.chunk_buffer.try_write() {
-            buffer.pop()
-        } else {
-            None
-        }
-    }
-}
-
-impl lol_html::OutputSink for Sink {
-    fn handle_chunk(&mut self, chunk: &[u8]) {
-        if let Ok(mut buffer) = self.chunk_buffer.try_write() {
-            buffer.push(Bytes::copy_from_slice(chunk));
-        }
-    }
-}
-
-struct UnsafeSend<T>(T);
-
-impl<T> UnsafeSend<T> {
-    unsafe fn new(value: T) -> Self {
-        Self(value)
-    }
-}
-
-unsafe impl<T> Send for UnsafeSend<T> {}
