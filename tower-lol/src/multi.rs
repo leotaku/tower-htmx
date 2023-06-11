@@ -1,54 +1,59 @@
-use std::{
-    future::Future,
-    pin::Pin,
-    task::{ready, Poll},
-};
+use std::{collections::HashMap, future::Future, pin::Pin};
 
-use bytes::{Buf, Bytes, BytesMut};
-use http::{Request, Response};
+use bytes::{BufMut, Bytes, BytesMut};
+use http::{Request, Response, Uri};
 use tower::{Layer, Service};
 
-pub struct MultiContext<T> {
-    entries: std::collections::HashMap<String, T>,
+pub struct ResolveContext {
+    pub entries: std::collections::HashMap<String, Option<Bytes>>,
+}
+
+impl ResolveContext {
+    pub fn new() -> Self {
+        Self {
+            entries: HashMap::new(),
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
-pub struct HoldupLayer {}
+pub struct ResolveLayer {}
 
-impl HoldupLayer {
+impl ResolveLayer {
     pub fn new() -> Self {
         Self {}
     }
 }
 
-impl<S> Layer<S> for HoldupLayer {
-    type Service = HoldupService<S>;
+impl<S> Layer<S> for ResolveLayer {
+    type Service = ResolveService<S>;
 
     fn layer(&self, inner: S) -> Self::Service {
-        HoldupService::new(inner)
+        ResolveService::new(inner)
     }
 }
 
 #[derive(Debug, Clone)]
-pub struct HoldupService<S> {
+pub struct ResolveService<S> {
     inner: S,
 }
 
-impl<S> HoldupService<S> {
+impl<S> ResolveService<S> {
     pub fn new(inner: S) -> Self {
         Self { inner }
     }
 }
 
-impl<S, ReqBody, ResBody> Service<Request<ReqBody>> for HoldupService<S>
+impl<S, ReqBody, ResBody> Service<Request<ReqBody>> for ResolveService<S>
 where
-    S: Service<Request<ReqBody>>,
-    S::Future: Future<Output = Result<Response<ResBody>, S::Error>>,
-    ResBody: http_body::Body + Unpin,
+    S: Service<Request<ReqBody>> + Clone + Send + 'static,
+    S::Future: Future<Output = Result<Response<ResBody>, S::Error>> + Send,
+    ReqBody: Default + Send + 'static,
+    ResBody: http_body::Body + Send + Unpin,
 {
-    type Response = Response<HoldupBody<ResBody>>;
+    type Response = Response<ResBody>;
     type Error = S::Error;
-    type Future = HoldupFuture<ResBody, S::Error, S::Future>;
+    type Future = Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send>>;
 
     fn poll_ready(
         &mut self,
@@ -58,99 +63,46 @@ where
     }
 
     fn call(&mut self, req: Request<ReqBody>) -> Self::Future {
-        HoldupFuture {
-            inner: self.inner.call(req),
-            buffer: Some(BytesMut::new()),
-            response: None,
-            _phantom: Default::default(),
-        }
-    }
-}
+        let mut cloned = self.clone();
+        let uri = dbg!(req.uri()).clone();
+        let res = self.inner.call(req);
 
-pin_project_lite::pin_project! {
-    pub struct HoldupFuture<B, E, F> {
-        #[pin]
-        inner: F,
-        buffer: Option<BytesMut>,
-        response: Option<Response<B>>,
-        _phantom: std::marker::PhantomData<E>,
-    }
-}
+        Box::pin(async move {
+            std::future::poll_fn(|cx| cloned.poll_ready(cx)).await?;
 
-impl<B, E, F> Future for HoldupFuture<B, E, F>
-where
-    F: Future<Output = Result<Response<B>, E>>,
-    B: http_body::Body + Unpin,
-{
-    type Output = Result<Response<HoldupBody<B>>, E>;
+            let mut res = res.await?;
+            let ctx: &mut ResolveContext = match res.extensions_mut().get_mut() {
+                Some(some) => some,
+                None => return Ok(res),
+            };
 
-    fn poll(self: std::pin::Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> Poll<Self::Output> {
-        let this = self.project();
+            for (key, value) in ctx.entries.iter_mut() {
+                let mut inner_res = cloned
+                    .inner
+                    .call(
+                        Request::builder()
+                            .method("GET")
+                            .uri(format!("/{key}"))
+                            .body(Default::default())
+                            .unwrap(),
+                    )
+                    .await?;
 
-        let mut response = if let Some(response) = this.response.take() {
-            response
-        } else {
-            *this.response = Some(ready!(this.inner.poll(cx)?));
-            return Poll::Pending;
-        };
+                let mut buf = BytesMut::new();
+                while let Some(chunk) = inner_res
+                    .body_mut()
+                    .data()
+                    .await
+                    .transpose()
+                    .unwrap_or_else(|_| panic!())
+                {
+                    buf.put(chunk);
+                }
 
-        response.extensions_mut().remove::<MultiContext<String>>();
+                *value = Some(buf.into())
+            }
 
-        Poll::Ready(Ok(response.map(|b| HoldupBody::new(b))))
-
-        // match ready!(Pin::new(response.body_mut()).poll_data(cx)) {
-        //     Some(Ok(mut chunk)) => {
-        //         this.buffer
-        //             .as_mut()
-        //             .map(|buf|
-        // buf.extend(chunk.copy_to_bytes(chunk.remaining())));
-
-        //         Poll::Pending
-        //     }
-        //     Some(Err(err)) => {
-        //         todo!()
-        //     }
-        //     None => Poll::Ready(Ok(this
-        //         .response
-        //         .take()
-        //         .unwrap()
-        //         .map(|_| this.buffer.take().expect("TODO").into()))),
-        // }
-    }
-}
-
-pin_project_lite::pin_project! {
-    pub struct HoldupBody<B> {
-        #[pin]
-        body: B,
-    }
-}
-
-impl<B> HoldupBody<B> {
-    fn new(body: B) -> Self {
-        Self { body }
-    }
-}
-
-impl<B: http_body::Body> http_body::Body for HoldupBody<B> {
-    type Data = Bytes;
-    type Error = B::Error;
-
-    fn poll_data(
-        self: Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
-    ) -> Poll<Option<Result<Self::Data, Self::Error>>> {
-        let this = self.project();
-        this.body
-            .poll_data(cx)
-            .map_ok(|mut chunk| chunk.copy_to_bytes(chunk.remaining()))
-    }
-
-    fn poll_trailers(
-        self: Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
-    ) -> Poll<Result<Option<http::HeaderMap>, Self::Error>> {
-        let this = self.project();
-        this.body.poll_trailers(cx)
+            Ok(res)
+        })
     }
 }

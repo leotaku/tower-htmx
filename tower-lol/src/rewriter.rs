@@ -1,71 +1,24 @@
 use crate::{
     either::EitherBody,
+    settings::SettingsProvider,
     util::{ErrorBody, UnsafeSend},
 };
 
 use std::{
+    error::Error,
     future::Future,
     pin::Pin,
     task::{Context, Poll},
 };
 
 use bytes::{Buf, Bytes, BytesMut};
-use http::{header::Entry, uri::PathAndQuery, Request, Response};
+use http::{header::Entry, Request, Response};
 use http_body::{Body, Full};
 use lol_html::{errors::RewritingError, HtmlRewriter, Settings};
 use tower::{Layer, Service};
 
 pub struct HtmlRewriterLayer<Sett> {
     settings: Sett,
-}
-
-pub trait SettingsProvider<ReqBody, ResBody> {
-    fn set_request(&mut self, req: &Request<ReqBody>);
-    fn provide<'b, 'a: 'b>(
-        &mut self,
-        res: &'a mut Response<ResBody>,
-    ) -> Option<Settings<'b, 'static>>;
-}
-
-fn provide_settings<'b, 'a: 'b, ReqBody, ResBody, S: SettingsProvider<ReqBody, ResBody>>(
-    settings: &mut S,
-    res: &'a mut Response<ResBody>,
-) -> Option<UnsafeSend<Settings<'b, 'static>>> {
-    settings
-        .provide(res)
-        .map(|it| unsafe { UnsafeSend::new(it) })
-}
-
-#[derive(Debug, Clone)]
-pub struct SettingsFromQuery<F> {
-    query: Option<PathAndQuery>,
-    function: F,
-}
-
-impl<F> SettingsFromQuery<F> {
-    pub fn new(function: F) -> Self {
-        Self {
-            query: None,
-            function,
-        }
-    }
-}
-
-impl<F, ReqBody, ResBody> SettingsProvider<ReqBody, ResBody> for SettingsFromQuery<F>
-where
-    F: Fn(&PathAndQuery, &mut Response<ResBody>) -> Option<Settings<'static, 'static>> + Copy,
-{
-    fn set_request(&mut self, req: &Request<ReqBody>) {
-        self.query = req.uri().path_and_query().cloned();
-    }
-
-    fn provide<'b, 'a: 'b>(
-        &mut self,
-        res: &'a mut Response<ResBody>,
-    ) -> Option<Settings<'b, 'static>> {
-        let f = self.function;
-        f(self.query.as_mut().unwrap(), res)
-    }
 }
 
 impl<Sett> HtmlRewriterLayer<Sett> {
@@ -116,9 +69,10 @@ impl<S, Sett, ReqBody, ResBody> Service<Request<ReqBody>> for HtmlRewriterServic
 where
     S: Service<Request<ReqBody>, Response = Response<ResBody>> + Clone + Send + 'static,
     S::Future: Send,
-    Sett: SettingsProvider<ReqBody, ResBody> + Clone + Send + 'static,
-    ResBody: Body + Unpin + Send,
+    Sett: SettingsProvider + Clone + Send + 'static,
     ReqBody: Send + 'static,
+    ResBody: Body + Unpin + Send,
+    ResBody::Error: Error + Send + Sync + 'static,
 {
     type Response = Response<TriBody<Full<Bytes>, ResBody, ErrorBody<Bytes, RewritingError>>>;
     type Error = S::Error;
@@ -133,16 +87,24 @@ where
 
         Box::pin(async move {
             std::future::poll_fn(|cx| cloned.poll_ready(cx)).await?;
-            cloned.settings.set_request(&req);
+            let (parts, body) = req.into_parts();
+            cloned.settings.set_request(&parts);
+            let req = Request::from_parts(parts, body);
 
-            let mut response: Response<_> = cloned.inner.call(req).await?;
-
-            let settings = match provide_settings(&mut cloned.settings, &mut response) {
-                Some(settings) => settings,
-                None => return Ok(response.map(|body| EitherBody::b(EitherBody::a(body)))),
-            };
+            let response: Response<_> = cloned.inner.call(req).await?;
 
             let (mut parts, body) = response.into_parts();
+            let settings = match provide_settings(&mut cloned.settings, &mut parts) {
+                Some(settings) => settings,
+                none @ None => {
+                    drop(none);
+                    return Ok(Response::from_parts(
+                        parts,
+                        EitherBody::b(EitherBody::a(body)),
+                    ));
+                }
+            };
+
             let output = match handle_rewrite(settings, body).await {
                 Ok(output) => output,
                 Err(error) => {
@@ -165,10 +127,14 @@ where
     }
 }
 
-async fn handle_rewrite<B: http_body::Body + Unpin>(
-    settings: UnsafeSend<Settings<'static, 'static>>,
+async fn handle_rewrite<'a, B>(
+    settings: UnsafeSend<Settings<'a, 'static>>,
     mut body: B,
-) -> Result<BytesMut, RewritingError> {
+) -> Result<BytesMut, RewritingError>
+where
+    B: http_body::Body + Unpin,
+    B::Error: Error + Send + Sync + 'static,
+{
     let mut output = BytesMut::new();
     let mut rewriter = unsafe {
         UnsafeSend::new(HtmlRewriter::new(settings.inner, |chunk: &[u8]| {
@@ -176,11 +142,25 @@ async fn handle_rewrite<B: http_body::Body + Unpin>(
         }))
     };
 
-    while let Some(chunk) = body.data().await.transpose().unwrap_or_else(|_| panic!()) {
+    while let Some(chunk) = body
+        .data()
+        .await
+        .transpose()
+        .map_err(|err| RewritingError::ContentHandlerError(Box::new(err)))?
+    {
         rewriter.inner.write(chunk.chunk())?
     }
 
     rewriter.inner.end()?;
 
     Ok(output)
+}
+
+fn provide_settings<'b, 'a: 'b, S: SettingsProvider>(
+    settings: &mut S,
+    res: &'a mut http::response::Parts,
+) -> Option<UnsafeSend<Settings<'b, 'static>>> {
+    settings
+        .provide(res)
+        .map(|it| unsafe { UnsafeSend::new(it) })
 }

@@ -1,7 +1,8 @@
 mod either;
-mod multi;
-mod rewriter;
+pub mod multi;
+pub mod rewriter;
 mod util;
+pub mod settings;
 
-pub use multi::{HoldupLayer, HoldupService};
-pub use rewriter::{HtmlRewriterLayer, HtmlRewriterService, SettingsFromQuery, SettingsProvider};
+pub use multi::{ResolveLayer, ResolveService};
+pub use rewriter::{HtmlRewriterLayer, HtmlRewriterService};
