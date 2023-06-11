@@ -1,6 +1,5 @@
 use crate::{
     either::EitherBody,
-    settings::SettingsProvider,
     util::{ErrorBody, UnsafeSend},
 };
 
@@ -17,64 +16,57 @@ use http_body::{Body, Full};
 use lol_html::{errors::RewritingError, HtmlRewriter, Settings};
 use tower::{Layer, Service};
 
-pub struct HtmlRewriterLayer<Sett> {
-    settings: Sett,
+pub trait SettingsProvider {
+    fn set_request(&mut self, req: &http::request::Parts);
+    fn provide<'b, 'a: 'b>(
+        &mut self,
+        res: &'a mut http::response::Parts,
+    ) -> Option<Settings<'b, 'static>>;
 }
 
-impl<Sett> HtmlRewriterLayer<Sett> {
-    pub fn new(settings: Sett) -> Self {
+#[derive(Debug, Clone)]
+pub struct HtmlRewriterLayer<C> {
+    settings: C,
+}
+
+impl<C> HtmlRewriterLayer<C> {
+    pub fn new(settings: C) -> Self {
         Self { settings }
     }
 }
 
-impl<Sett: Clone> Clone for HtmlRewriterLayer<Sett> {
-    fn clone(&self) -> Self {
-        Self {
-            settings: self.settings.clone(),
-        }
-    }
-}
-
-impl<S, Sett: Clone> Layer<S> for HtmlRewriterLayer<Sett> {
-    type Service = HtmlRewriterService<S, Sett>;
+impl<S, C: Clone> Layer<S> for HtmlRewriterLayer<C> {
+    type Service = HtmlRewriterService<C, S>;
 
     fn layer(&self, inner: S) -> Self::Service {
         Self::Service::new(inner, self.settings.clone())
     }
 }
 
-pub struct HtmlRewriterService<S, Sett> {
+#[derive(Clone, Debug)]
+pub struct HtmlRewriterService<C, S> {
+    settings: C,
     inner: S,
-    settings: Sett,
 }
 
-impl<S: Clone, Sett: Clone> Clone for HtmlRewriterService<S, Sett> {
-    fn clone(&self) -> Self {
-        Self {
-            inner: self.inner.clone(),
-            settings: self.settings.clone(),
-        }
-    }
-}
-
-impl<S, Sett> HtmlRewriterService<S, Sett> {
-    pub fn new(inner: S, settings: Sett) -> Self {
+impl<C, S> HtmlRewriterService<C, S> {
+    pub fn new(inner: S, settings: C) -> Self {
         Self { inner, settings }
     }
 }
 
 type TriBody<A, B, C> = EitherBody<A, EitherBody<B, C>>;
 
-impl<S, Sett, ReqBody, ResBody> Service<Request<ReqBody>> for HtmlRewriterService<S, Sett>
+impl<S, C, ReqBody, ResBody> Service<Request<ReqBody>> for HtmlRewriterService<C, S>
 where
     S: Service<Request<ReqBody>, Response = Response<ResBody>> + Clone + Send + 'static,
     S::Future: Send,
-    Sett: SettingsProvider + Clone + Send + 'static,
+    C: SettingsProvider + Clone + Send + 'static,
     ReqBody: Send + 'static,
     ResBody: Body + Unpin + Send,
     ResBody::Error: Error + Send + Sync + 'static,
 {
-    type Response = Response<TriBody<Full<Bytes>, ResBody, ErrorBody<Bytes, RewritingError>>>;
+    type Response = Response<TriBody<Full<Bytes>, ResBody, ErrorBody<ResBody::Data, RewritingError>>>;
     type Error = S::Error;
     type Future = Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send>>;
 
@@ -87,13 +79,17 @@ where
 
         Box::pin(async move {
             std::future::poll_fn(|cx| cloned.poll_ready(cx)).await?;
-            let (parts, body) = req.into_parts();
-            cloned.settings.set_request(&parts);
-            let req = Request::from_parts(parts, body);
 
-            let response: Response<_> = cloned.inner.call(req).await?;
+            let req = {
+                let (parts, body) = req.into_parts();
+                cloned.settings.set_request(&parts);
+                Request::from_parts(parts, body)
+            };
 
-            let (mut parts, body) = response.into_parts();
+            let res = cloned.inner.call(req).await?;
+
+            let (mut parts, body) = res.into_parts();
+
             let settings = match provide_settings(&mut cloned.settings, &mut parts) {
                 Some(settings) => settings,
                 none @ None => {
