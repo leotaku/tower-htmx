@@ -8,6 +8,10 @@ use bytes::{Buf, Bytes, BytesMut};
 use http::{Request, Response};
 use tower::{Layer, Service};
 
+pub struct MultiContext<T> {
+    entries: std::collections::HashMap<String, T>,
+}
+
 #[derive(Debug, Clone)]
 pub struct HoldupLayer {}
 
@@ -42,7 +46,7 @@ where
     S::Future: Future<Output = Result<Response<ResBody>, S::Error>>,
     ResBody: http_body::Body + Unpin,
 {
-    type Response = Response<Bytes>;
+    type Response = Response<HoldupBody<ResBody>>;
     type Error = S::Error;
     type Future = HoldupFuture<ResBody, S::Error, S::Future>;
 
@@ -78,34 +82,75 @@ where
     F: Future<Output = Result<Response<B>, E>>,
     B: http_body::Body + Unpin,
 {
-    type Output = Result<Response<Bytes>, E>;
+    type Output = Result<Response<HoldupBody<B>>, E>;
 
     fn poll(self: std::pin::Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> Poll<Self::Output> {
         let this = self.project();
 
-        let response = if let Some(response) = this.response {
+        let mut response = if let Some(response) = this.response.take() {
             response
         } else {
             *this.response = Some(ready!(this.inner.poll(cx)?));
             return Poll::Pending;
         };
 
-        match ready!(Pin::new(response.body_mut()).poll_data(cx)) {
-            Some(Ok(mut chunk)) => {
-                this.buffer
-                    .as_mut()
-                    .map(|buf| buf.extend(chunk.copy_to_bytes(chunk.remaining())));
+        response.extensions_mut().remove::<MultiContext<String>>();
 
-                Poll::Pending
-            }
-            Some(Err(err)) => {
-                todo!()
-            }
-            None => Poll::Ready(Ok(this
-                .response
-                .take()
-                .unwrap()
-                .map(|_| this.buffer.take().expect("TODO").into()))),
-        }
+        Poll::Ready(Ok(response.map(|b| HoldupBody::new(b))))
+
+        // match ready!(Pin::new(response.body_mut()).poll_data(cx)) {
+        //     Some(Ok(mut chunk)) => {
+        //         this.buffer
+        //             .as_mut()
+        //             .map(|buf|
+        // buf.extend(chunk.copy_to_bytes(chunk.remaining())));
+
+        //         Poll::Pending
+        //     }
+        //     Some(Err(err)) => {
+        //         todo!()
+        //     }
+        //     None => Poll::Ready(Ok(this
+        //         .response
+        //         .take()
+        //         .unwrap()
+        //         .map(|_| this.buffer.take().expect("TODO").into()))),
+        // }
+    }
+}
+
+pin_project_lite::pin_project! {
+    pub struct HoldupBody<B> {
+        #[pin]
+        body: B,
+    }
+}
+
+impl<B> HoldupBody<B> {
+    fn new(body: B) -> Self {
+        Self { body }
+    }
+}
+
+impl<B: http_body::Body> http_body::Body for HoldupBody<B> {
+    type Data = Bytes;
+    type Error = B::Error;
+
+    fn poll_data(
+        self: Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> Poll<Option<Result<Self::Data, Self::Error>>> {
+        let this = self.project();
+        this.body
+            .poll_data(cx)
+            .map_ok(|mut chunk| chunk.copy_to_bytes(chunk.remaining()))
+    }
+
+    fn poll_trailers(
+        self: Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> Poll<Result<Option<http::HeaderMap>, Self::Error>> {
+        let this = self.project();
+        this.body.poll_trailers(cx)
     }
 }

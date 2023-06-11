@@ -1,6 +1,6 @@
 mod either;
-mod holdup;
+mod multi;
 mod rewriter;
 
-pub use holdup::{HoldupLayer, HoldupService};
+pub use multi::{HoldupLayer, HoldupService};
 pub use rewriter::{HtmlRewriterLayer, HtmlRewriterService};
