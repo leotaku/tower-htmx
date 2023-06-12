@@ -21,6 +21,12 @@ impl ResolveContext {
     }
 }
 
+impl Default for ResolveContext {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 /// TODO
 #[derive(Debug, Clone)]
 pub struct ResolveLayer {}
@@ -29,6 +35,12 @@ impl ResolveLayer {
     /// TODO
     pub fn new() -> Self {
         Self {}
+    }
+}
+
+impl Default for ResolveLayer {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
