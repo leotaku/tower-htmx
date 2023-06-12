@@ -23,9 +23,9 @@ use tower::{Layer, Service};
 /// said response metadata in addition to the response body.
 pub trait SettingsProvider {
     /// Handle http request metadata by storing any required data.
-    fn set_request(&mut self, req: &http::request::Parts);
+    fn handle_request(&mut self, req: &http::request::Parts);
     /// Handle http response metadata by returning some dependent settings.
-    fn provide<'b, 'a: 'b>(
+    fn handle_response<'b, 'a: 'b>(
         &mut self,
         res: &'a mut http::response::Parts,
     ) -> Option<Settings<'b, 'static>>;
@@ -87,7 +87,7 @@ where
         Box::pin(async move {
             let req = {
                 let (parts, body) = req.into_parts();
-                cloned.settings.set_request(&parts);
+                cloned.settings.handle_request(&parts);
                 Request::from_parts(parts, body)
             };
 
@@ -224,6 +224,6 @@ fn provide_settings<'b, 'a: 'b, S: SettingsProvider>(
     res: &'a mut http::response::Parts,
 ) -> Option<UnsafeSend<Settings<'b, 'static>>> {
     settings
-        .provide(res)
+        .handle_response(res)
         .map(|it| unsafe { UnsafeSend::new(it) })
 }

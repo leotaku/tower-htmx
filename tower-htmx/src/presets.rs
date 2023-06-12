@@ -18,9 +18,9 @@ impl ExtractSettings {
 }
 
 impl SettingsProvider for ExtractSettings {
-    fn set_request(&mut self, _req: &http::request::Parts) {}
+    fn handle_request(&mut self, _req: &http::request::Parts) {}
 
-    fn provide<'b, 'a: 'b>(
+    fn handle_response<'b, 'a: 'b>(
         &mut self,
         res: &'a mut http::response::Parts,
     ) -> Option<Settings<'b, 'static>> {
@@ -52,9 +52,9 @@ impl InsertSettings {
 }
 
 impl SettingsProvider for InsertSettings {
-    fn set_request(&mut self, _req: &http::request::Parts) {}
+    fn handle_request(&mut self, _req: &http::request::Parts) {}
 
-    fn provide<'b, 'a: 'b>(
+    fn handle_response<'b, 'a: 'b>(
         &mut self,
         res: &'a mut http::response::Parts,
     ) -> Option<Settings<'b, 'static>> {
@@ -107,7 +107,7 @@ impl SubsetSettings {
 }
 
 impl SettingsProvider for SubsetSettings {
-    fn set_request(&mut self, req: &http::request::Parts) {
+    fn handle_request(&mut self, req: &http::request::Parts) {
         fn inner(this: &mut SubsetSettings, req: &http::request::Parts) -> Option<String> {
             let url = form_urlencoded::parse(req.uri.query()?.as_bytes());
             let query: HashMap<Cow<'_, str>, Cow<'_, str>> = url.collect();
@@ -122,7 +122,7 @@ impl SettingsProvider for SubsetSettings {
         self.selector = inner(self, req);
     }
 
-    fn provide<'b, 'a: 'b>(
+    fn handle_response<'b, 'a: 'b>(
         &mut self,
         _res: &'a mut http::response::Parts,
     ) -> Option<Settings<'b, 'static>> {
