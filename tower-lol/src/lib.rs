@@ -21,12 +21,30 @@ use tower::{Layer, Service};
 
 /// TODO
 #[derive(Debug, Clone)]
-pub struct TemplateLayer {}
+pub struct TemplateLayer {
+    attribute_name: String,
+}
 
 impl TemplateLayer {
     /// TODO
     pub fn new() -> Self {
-        Self {}
+        Self {
+            attribute_name: "hx-get".to_owned(),
+        }
+    }
+
+    /// TODO
+    pub fn attribute<T: Into<String>>(self, attribute_name: T) -> Self {
+        Self {
+            attribute_name: attribute_name.into(),
+            ..self
+        }
+    }
+}
+
+impl Default for TemplateLayer {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -34,7 +52,7 @@ impl<S> Layer<S> for TemplateLayer {
     type Service = TemplateService<S>;
 
     fn layer(&self, inner: S) -> Self::Service {
-        TemplateService::new(inner)
+        TemplateService::new(inner, self.attribute_name.clone())
     }
 }
 
@@ -49,10 +67,11 @@ pub struct TemplateService<S> {
 
 impl<S> TemplateService<S> {
     /// TODO
-    pub fn new(inner: S) -> Self {
-        let extract_svc = HtmlRewriterService::new(inner, ExtractSettings::new());
+    pub fn new(inner: S, attribute_name: String) -> Self {
+        let extract_svc =
+            HtmlRewriterService::new(inner, ExtractSettings::new(attribute_name.clone()));
         let resolve_svc = ResolveService::new(extract_svc);
-        let inject_svc = HtmlRewriterService::new(resolve_svc, InsertSettings::new());
+        let inject_svc = HtmlRewriterService::new(resolve_svc, InsertSettings::new(attribute_name));
 
         Self { inner: inject_svc }
     }
@@ -84,12 +103,30 @@ where
 
 /// TODO
 #[derive(Debug, Clone)]
-pub struct SubsetLayer {}
+pub struct SubsetLayer {
+    query_name: String,
+}
 
 impl SubsetLayer {
     /// TODO
     pub fn new() -> Self {
-        Self {}
+        Self {
+            query_name: "hx-select".to_owned(),
+        }
+    }
+
+    /// TODO
+    pub fn query<T: Into<String>>(self, query_name: T) -> Self {
+        Self {
+            query_name: query_name.into(),
+            ..self
+        }
+    }
+}
+
+impl Default for SubsetLayer {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -97,7 +134,7 @@ impl<S> Layer<S> for SubsetLayer {
     type Service = SubsetService<S>;
 
     fn layer(&self, inner: S) -> Self::Service {
-        SubsetService::new(inner)
+        SubsetService::new(inner, self.query_name.clone())
     }
 }
 
@@ -111,8 +148,8 @@ pub struct SubsetService<S> {
 
 impl<S> SubsetService<S> {
     /// TODO
-    pub fn new(inner: S) -> Self {
-        let subset_svc = HtmlRewriterService::new(inner, SubsetSettings::new());
+    pub fn new(inner: S, attribute_name: String) -> Self {
+        let subset_svc = HtmlRewriterService::new(inner, SubsetSettings::new(attribute_name));
 
         Self { inner: subset_svc }
     }

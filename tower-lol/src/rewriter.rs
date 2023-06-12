@@ -62,7 +62,8 @@ where
     ResBody: Body + Unpin + Send,
     ResBody::Error: Error + Send + Sync + 'static,
 {
-    type Response = Response<TriBody<Full<Bytes>, ResBody, ErrorBody<ResBody::Data, RewritingError>>>;
+    type Response =
+        Response<TriBody<Full<Bytes>, ResBody, ErrorBody<ResBody::Data, RewritingError>>>;
     type Error = S::Error;
     type Future = Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send>>;
 
