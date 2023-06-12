@@ -1,0 +1,3 @@
+[workspace]
+members = ["tower-lol", "tower-htmx", "example"]
+resolver = "2"
