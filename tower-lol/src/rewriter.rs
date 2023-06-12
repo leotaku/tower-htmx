@@ -53,19 +53,19 @@ impl<C, S> HtmlRewriterService<C, S> {
 
 type TriBody<A, B, C> = EitherBody<A, EitherBody<B, C>>;
 
+type HtmlRewriterBody<ResBody, ResBodyData> =
+    TriBody<Full<Bytes>, ResBody, ErrorBody<ResBodyData, RewritingError>>;
+
 impl<S, C, ReqBody, ResBody> Service<Request<ReqBody>> for HtmlRewriterService<C, S>
 where
-    S: Service<Request<ReqBody>, Response = Response<ResBody>> + Clone + Send + 'static,
-    S::Future: Send,
-    C: SettingsProvider + Clone + Send + 'static,
-    ReqBody: Send + 'static,
-    ResBody: Body + Unpin + Send,
+    S: Service<Request<ReqBody>, Response = Response<ResBody>> + Clone,
+    C: SettingsProvider + Clone,
+    ResBody: Body + Unpin,
     ResBody::Error: Error + Send + Sync + 'static,
 {
-    type Response =
-        Response<TriBody<Full<Bytes>, ResBody, ErrorBody<ResBody::Data, RewritingError>>>;
+    type Response = Response<HtmlRewriterBody<ResBody, ResBody::Data>>;
     type Error = S::Error;
-    type Future = Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send>>;
+    type Future = impl Future<Output = Result<Self::Response, Self::Error>>;
 
     fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         self.inner.poll_ready(cx)
@@ -85,7 +85,7 @@ where
 
             let res = cloned.inner.call(req).await?;
 
-            let (mut parts, body) = res.into_parts();
+            let (mut parts, mut body) = res.into_parts();
 
             let settings = match provide_settings(&mut cloned.settings, &mut parts) {
                 Some(settings) => settings,
@@ -98,7 +98,7 @@ where
                 }
             };
 
-            let output = match handle_rewrite(settings, body).await {
+            let output = match handle_rewrite(settings, Pin::new(&mut body)).await {
                 Ok(output) => output,
                 Err(error) => {
                     return Ok(Response::from_parts(
@@ -120,12 +120,13 @@ where
     }
 }
 
+
 async fn handle_rewrite<'a, B>(
     settings: UnsafeSend<Settings<'a, 'static>>,
-    mut body: B,
+    mut body: Pin<&mut B>,
 ) -> Result<BytesMut, RewritingError>
 where
-    B: http_body::Body + Unpin,
+    B: http_body::Body,
     B::Error: Error + Send + Sync + 'static,
 {
     let mut output = BytesMut::new();

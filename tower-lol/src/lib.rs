@@ -1,5 +1,7 @@
 //! TODO
 
+#![feature(type_alias_impl_trait)]
+
 #![forbid(unused_unsafe)]
 #![warn(clippy::all, missing_docs, nonstandard_style, future_incompatible)]
 #![allow(clippy::type_complexity)]
@@ -79,10 +81,9 @@ impl<S> TemplateService<S> {
 
 impl<S, ReqBody, ResBody> Service<Request<ReqBody>> for TemplateService<S>
 where
-    S: Service<Request<ReqBody>, Response = Response<ResBody>> + Clone + Send + 'static,
-    S::Future: Send,
-    ReqBody: Body + Default + Send + 'static,
-    ResBody: Body<Data = Bytes> + Unpin + Send,
+    S: Service<Request<ReqBody>, Response = Response<ResBody>> + Clone,
+    ReqBody: Body + Default,
+    ResBody: Body + Unpin,
     ResBody::Error: Error + Send + Sync + 'static,
 {
     type Response = <InnerTemplateService<S> as Service<Request<ReqBody>>>::Response;
@@ -157,10 +158,9 @@ impl<S> SubsetService<S> {
 
 impl<S, ReqBody, ResBody> Service<Request<ReqBody>> for SubsetService<S>
 where
-    S: Service<Request<ReqBody>, Response = Response<ResBody>> + Clone + Send + 'static,
-    S::Future: Send,
-    ReqBody: Body + Default + Send + 'static,
-    ResBody: Body<Data = Bytes> + Unpin + Send,
+    S: Service<Request<ReqBody>, Response = Response<ResBody>> + Clone,
+    ReqBody: Body + Default,
+    ResBody: Body + Unpin,
     ResBody::Error: Error + Send + Sync + 'static,
 {
     type Response = <InnerSubsetService<S> as Service<Request<ReqBody>>>::Response;
