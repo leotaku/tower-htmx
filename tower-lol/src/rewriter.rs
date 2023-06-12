@@ -164,8 +164,8 @@ where
             return Poll::Ready(Some(Err(EitherError::A(err))));
         }
 
-        if let Some(rewritten) = this.rewritten.as_mut().map(|it| it.take()) {
-            return Poll::Ready(Ok(rewritten).transpose());
+        if let Some(rewritten) = this.rewritten.as_mut() {
+            return Poll::Ready(Ok(rewritten.take()).transpose());
         }
 
         this.inner
