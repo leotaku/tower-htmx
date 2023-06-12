@@ -112,7 +112,7 @@ where
                     .data()
                     .await
                     .transpose()
-                    .unwrap_or_else(|_| panic!())
+                    .unwrap_or_else(|_| panic!("TODO"))
                 {
                     buf.put(chunk);
                 }
