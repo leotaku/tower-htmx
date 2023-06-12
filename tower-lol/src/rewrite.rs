@@ -31,21 +31,21 @@ pub trait SettingsProvider {
     ) -> Option<Settings<'b, 'static>>;
 }
 
-/// Layer to apply [`HtmlRewriterService`] middleware.
+/// Layer to apply [`HtmlRewriteService`] middleware.
 #[derive(Debug, Clone)]
-pub struct HtmlRewriterLayer<C> {
+pub struct HtmlRewriteLayer<C> {
     settings: C,
 }
 
-impl<C> HtmlRewriterLayer<C> {
-    /// Create a new [`HtmlRewriterLayer`].
+impl<C> HtmlRewriteLayer<C> {
+    /// Create a new [`HtmlRewriteLayer`].
     pub fn new(settings: C) -> Self {
         Self { settings }
     }
 }
 
-impl<S, C: Clone> Layer<S> for HtmlRewriterLayer<C> {
-    type Service = HtmlRewriterService<C, S>;
+impl<S, C: Clone> Layer<S> for HtmlRewriteLayer<C> {
+    type Service = HtmlRewriteService<C, S>;
 
     fn layer(&self, inner: S) -> Self::Service {
         Self::Service::new(inner, self.settings.clone())
@@ -54,26 +54,26 @@ impl<S, C: Clone> Layer<S> for HtmlRewriterLayer<C> {
 
 /// Middleware that modifies HTML in-flight.
 #[derive(Clone, Debug)]
-pub struct HtmlRewriterService<C, S> {
+pub struct HtmlRewriteService<C, S> {
     settings: C,
     inner: S,
 }
 
-impl<C, S> HtmlRewriterService<C, S> {
-    /// Create a new [`HtmlRewriterService`] middleware.
+impl<C, S> HtmlRewriteService<C, S> {
+    /// Create a new [`HtmlRewriteService`] middleware.
     pub fn new(inner: S, settings: C) -> Self {
         Self { inner, settings }
     }
 }
 
-impl<S, C, ReqBody, ResBody> Service<Request<ReqBody>> for HtmlRewriterService<C, S>
+impl<S, C, ReqBody, ResBody> Service<Request<ReqBody>> for HtmlRewriteService<C, S>
 where
     S: Service<Request<ReqBody>, Response = Response<ResBody>> + Clone,
     C: SettingsProvider + Clone,
     ResBody: Body + Unpin,
     ResBody::Error: Error + Send + Sync + 'static,
 {
-    type Response = Response<HtmlRewriterBody<ResBody, RewritingError>>;
+    type Response = Response<HtmlRewriteBody<ResBody, RewritingError>>;
     type Error = S::Error;
     type Future = impl Future<Output = Result<Self::Response, Self::Error>>;
 
@@ -97,8 +97,8 @@ where
             };
 
             let body = match provide_settings(&mut cloned.settings, &mut parts) {
-                Some(settings) => HtmlRewriterBody::new(body, settings).await,
-                None => HtmlRewriterBody::passthrough(body),
+                Some(settings) => HtmlRewriteBody::new(body, settings).await,
+                None => HtmlRewriteBody::passthrough(body),
             };
 
             if let Entry::Occupied(mut entry) = parts.headers.entry(http::header::CONTENT_LENGTH) {
@@ -112,7 +112,7 @@ where
 
 pin_project_lite::pin_project! {
     #[doc(hidden)]
-    pub struct HtmlRewriterBody<B, E> {
+    pub struct HtmlRewriteBody<B, E> {
         #[pin]
         inner: B,
         error: Option<E>,
@@ -120,7 +120,7 @@ pin_project_lite::pin_project! {
     }
 }
 
-impl<B> HtmlRewriterBody<B, RewritingError>
+impl<B> HtmlRewriteBody<B, RewritingError>
 where
     B: http_body::Body + Unpin,
     B::Error: Error + Send + Sync + 'static,
@@ -141,7 +141,7 @@ where
     }
 }
 
-impl<B, E> HtmlRewriterBody<B, E> {
+impl<B, E> HtmlRewriteBody<B, E> {
     fn passthrough(body: B) -> Self {
         Self {
             inner: body,
@@ -155,7 +155,7 @@ impl<B, E> HtmlRewriterBody<B, E> {
     }
 }
 
-impl<B, E> http_body::Body for HtmlRewriterBody<B, E>
+impl<B, E> http_body::Body for HtmlRewriteBody<B, E>
 where
     B: http_body::Body,
 {

@@ -4,7 +4,7 @@ use std::ops::Not;
 use tower_lol::lol_html::html_content::{Element, UserData};
 use tower_lol::lol_html::{self, Settings};
 use tower_lol::resolve::ResolveContext;
-use tower_lol::rewriter::SettingsProvider;
+use tower_lol::rewrite::SettingsProvider;
 
 #[derive(Debug, Clone)]
 pub struct ExtractSettings {

@@ -14,7 +14,7 @@ use presets::{ExtractSettings, InsertSettings, SubsetSettings};
 use std::error::Error;
 use tower::{Layer, Service};
 use tower_lol::resolve::ResolveService;
-use tower_lol::rewriter::HtmlRewriterService;
+use tower_lol::rewrite::HtmlRewriteService;
 
 /// Layer to apply [`TemplateService`] middleware.
 #[derive(Debug, Clone)]
@@ -55,7 +55,7 @@ impl<S> Layer<S> for TemplateLayer {
 }
 
 type InnerTemplateService<S> =
-    HtmlRewriterService<InsertSettings, ResolveService<HtmlRewriterService<ExtractSettings, S>>>;
+    HtmlRewriteService<InsertSettings, ResolveService<HtmlRewriteService<ExtractSettings, S>>>;
 
 /// Middleware that templates a HTML document.
 #[derive(Debug, Clone)]
@@ -67,9 +67,9 @@ impl<S> TemplateService<S> {
     /// Create a new [`TemplateService`] middleware.
     pub fn new(inner: S, attribute_name: String) -> Self {
         let extract_svc =
-            HtmlRewriterService::new(inner, ExtractSettings::new(attribute_name.clone()));
+            HtmlRewriteService::new(inner, ExtractSettings::new(attribute_name.clone()));
         let resolve_svc = ResolveService::new(extract_svc);
-        let inject_svc = HtmlRewriterService::new(resolve_svc, InsertSettings::new(attribute_name));
+        let inject_svc = HtmlRewriteService::new(resolve_svc, InsertSettings::new(attribute_name));
 
         Self { inner: inject_svc }
     }
@@ -136,7 +136,7 @@ impl<S> Layer<S> for SubsetLayer {
     }
 }
 
-type InnerSubsetService<S> = HtmlRewriterService<SubsetSettings, S>;
+type InnerSubsetService<S> = HtmlRewriteService<SubsetSettings, S>;
 
 /// Middleware that selects a subset of HTML based on a query.
 #[derive(Debug, Clone)]
@@ -147,7 +147,7 @@ pub struct SubsetService<S> {
 impl<S> SubsetService<S> {
     /// Create a new [`SubsetService`] middleware.
     pub fn new(inner: S, attribute_name: String) -> Self {
-        let subset_svc = HtmlRewriterService::new(inner, SubsetSettings::new(attribute_name));
+        let subset_svc = HtmlRewriteService::new(inner, SubsetSettings::new(attribute_name));
 
         Self { inner: subset_svc }
     }
