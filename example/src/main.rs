@@ -1,8 +1,8 @@
 #![feature(closure_lifetime_binder)]
 
 use axum::Router;
-use tower_http::services::ServeDir;
 use tower_htmx::{SubsetLayer, TemplateLayer};
+use tower_http::services::ServeDir;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {

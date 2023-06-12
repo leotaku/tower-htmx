@@ -1,5 +1,5 @@
-use std::collections::HashMap;
 use std::borrow::Cow;
+use std::collections::HashMap;
 use std::ops::Not;
 use tower_lol::lol_html::html_content::{Element, UserData};
 use tower_lol::lol_html::{self, Settings};
