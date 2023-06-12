@@ -9,7 +9,7 @@ use tower::{Layer, Service};
 /// Newtype wrapper to hold responses in [`http::Extensions`].
 pub struct ResolveContext {
     /// Map of response entries.
-    pub entries: std::collections::HashMap<String, Option<Bytes>>,
+    pub entries: std::collections::HashMap<String, Option<Response<Bytes>>>,
 }
 
 impl ResolveContext {
@@ -117,7 +117,7 @@ where
                     buf.put(chunk);
                 }
 
-                *value = Some(buf.into())
+                *value = Some(inner_res.map(|_| buf.into()))
             }
 
             Ok(res)

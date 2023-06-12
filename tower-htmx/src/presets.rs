@@ -68,7 +68,8 @@ impl SettingsProvider for InsertSettings {
                     map.entries
                         .get(&attr)
                         .and_then(|it| it.as_ref())
-                        .ok_or("problem with inner content")?,
+                        .ok_or("problem with inner content")?
+                        .body(),
                 )?;
 
                 let ct = lol_html::html_content::ContentType::Html;
