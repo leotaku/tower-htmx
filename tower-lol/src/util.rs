@@ -1,44 +1,5 @@
-use bytes::Buf;
-use std::marker::PhantomData;
-
-pin_project_lite::pin_project! {
-    pub struct ErrorBody<D, E> {
-        error: Option<E>,
-        _phantom: PhantomData<D>,
-    }
-}
-
-impl<D, E> ErrorBody<D, E> {
-    pub fn new(error: E) -> Self {
-        Self {
-            error: Some(error),
-            _phantom: PhantomData::default(),
-        }
-    }
-}
-
-impl<D: Buf, E> http_body::Body for ErrorBody<D, E> {
-    type Data = D;
-    type Error = E;
-
-    fn poll_data(
-        self: std::pin::Pin<&mut Self>,
-        _cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<Option<Result<Self::Data, Self::Error>>> {
-        std::task::Poll::Ready(Some(Err(self
-            .project()
-            .error
-            .take()
-            .expect("no repeated calls after error"))))
-    }
-
-    fn poll_trailers(
-        self: std::pin::Pin<&mut Self>,
-        _cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<Result<Option<http::HeaderMap>, Self::Error>> {
-        unreachable!()
-    }
-}
+use std::error::Error;
+use std::fmt::Display;
 
 pub struct UnsafeSend<T> {
     pub inner: T,
@@ -52,9 +13,19 @@ impl<T> UnsafeSend<T> {
 
 unsafe impl<T> Send for UnsafeSend<T> {}
 
-pin_project_lite::pin_project! {
-    pub struct StoringFuture<O, F> {
-        #[pin] future: F,
-        output: Option<O>,
+#[derive(Debug, Clone)]
+pub enum EitherError<A, B> {
+    A(A),
+    B(B),
+}
+
+impl<A: Error, B: Error> Error for EitherError<A, B> {}
+
+impl<A: Display, B: Display> Display for EitherError<A, B> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            EitherError::A(a) => a.fmt(f),
+            EitherError::B(b) => b.fmt(f),
+        }
     }
 }

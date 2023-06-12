@@ -1,10 +1,10 @@
-use crate::resolve::ResolveContext;
-use crate::rewriter::SettingsProvider;
-use lol_html::html_content::{Element, UserData};
-use lol_html::Settings;
-use std::borrow::Cow;
 use std::collections::HashMap;
+use std::borrow::Cow;
 use std::ops::Not;
+use tower_lol::lol_html::html_content::{Element, UserData};
+use tower_lol::lol_html::{self, Settings};
+use tower_lol::resolve::ResolveContext;
+use tower_lol::rewriter::SettingsProvider;
 
 #[derive(Debug, Clone)]
 pub struct ExtractSettings {

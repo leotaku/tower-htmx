@@ -1,5 +1,6 @@
-use crate::either::EitherError;
-use crate::util::UnsafeSend;
+//! TODO
+
+use crate::util::{EitherError, UnsafeSend};
 use bytes::{Buf, Bytes, BytesMut};
 use http::header::Entry;
 use http::{Request, Response};
@@ -12,20 +13,25 @@ use std::pin::Pin;
 use std::task::{Context, Poll};
 use tower::{Layer, Service};
 
+/// TODO
 pub trait SettingsProvider {
+    /// TODO
     fn set_request(&mut self, req: &http::request::Parts);
+    /// TODO
     fn provide<'b, 'a: 'b>(
         &mut self,
         res: &'a mut http::response::Parts,
     ) -> Option<Settings<'b, 'static>>;
 }
 
+/// TODO
 #[derive(Debug, Clone)]
 pub struct HtmlRewriterLayer<C> {
     settings: C,
 }
 
 impl<C> HtmlRewriterLayer<C> {
+    /// TODO
     pub fn new(settings: C) -> Self {
         Self { settings }
     }
@@ -39,6 +45,7 @@ impl<S, C: Clone> Layer<S> for HtmlRewriterLayer<C> {
     }
 }
 
+/// TODO
 #[derive(Clone, Debug)]
 pub struct HtmlRewriterService<C, S> {
     settings: C,
@@ -46,6 +53,7 @@ pub struct HtmlRewriterService<C, S> {
 }
 
 impl<C, S> HtmlRewriterService<C, S> {
+    /// TODO
     pub fn new(inner: S, settings: C) -> Self {
         Self { inner, settings }
     }
@@ -98,6 +106,7 @@ where
 }
 
 pin_project_lite::pin_project! {
+    #[doc(hidden)]
     pub struct HtmlRewriterBody<B, E> {
         #[pin]
         inner: B,

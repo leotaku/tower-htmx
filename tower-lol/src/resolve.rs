@@ -1,15 +1,19 @@
+//! TODO
+
 use bytes::{BufMut, Bytes, BytesMut};
 use http::{Request, Response};
 use std::collections::HashMap;
 use std::future::Future;
-
 use tower::{Layer, Service};
 
+/// TODO
 pub struct ResolveContext {
+    /// TODO
     pub entries: std::collections::HashMap<String, Option<Bytes>>,
 }
 
 impl ResolveContext {
+    /// TODO
     pub fn new() -> Self {
         Self {
             entries: HashMap::new(),
@@ -17,10 +21,12 @@ impl ResolveContext {
     }
 }
 
+/// TODO
 #[derive(Debug, Clone)]
 pub struct ResolveLayer {}
 
 impl ResolveLayer {
+    /// TODO
     pub fn new() -> Self {
         Self {}
     }
@@ -35,11 +41,13 @@ impl<S> Layer<S> for ResolveLayer {
 }
 
 #[derive(Debug, Clone)]
+/// TODO
 pub struct ResolveService<S> {
     inner: S,
 }
 
 impl<S> ResolveService<S> {
+    /// TODO
     pub fn new(inner: S) -> Self {
         Self { inner }
     }
