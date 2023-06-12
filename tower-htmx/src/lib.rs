@@ -31,6 +31,7 @@ impl TemplateLayer {
 
     /// TODO
     pub fn attribute<T: Into<String>>(self, attribute_name: T) -> Self {
+        #[allow(clippy::needless_update)]
         Self {
             attribute_name: attribute_name.into(),
             ..self
@@ -112,6 +113,7 @@ impl SubsetLayer {
 
     /// TODO
     pub fn query<T: Into<String>>(self, query_name: T) -> Self {
+        #[allow(clippy::needless_update)]
         Self {
             query_name: query_name.into(),
             ..self
