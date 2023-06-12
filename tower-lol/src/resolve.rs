@@ -72,19 +72,17 @@ where
     }
 
     fn call(&mut self, req: Request<ReqBody>) -> Self::Future {
-        let mut cloned = self.clone();
-        let res = self.inner.call(req);
+        let mut cloned = std::mem::replace(self, self.clone());
 
         Box::pin(async move {
-            std::future::poll_fn(|cx| cloned.poll_ready(cx)).await?;
-
-            let mut res = res.await?;
+            let mut res = cloned.inner.call(req).await?;
             let ctx: &mut ResolveContext = match res.extensions_mut().get_mut() {
                 Some(some) => some,
                 None => return Ok(res),
             };
 
             for (key, value) in ctx.entries.iter_mut() {
+                std::future::poll_fn(|cx| cloned.poll_ready(cx)).await?;
                 let mut inner_res = cloned
                     .inner
                     .call(

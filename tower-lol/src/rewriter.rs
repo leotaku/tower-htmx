@@ -75,11 +75,9 @@ where
     }
 
     fn call(&mut self, req: Request<ReqBody>) -> Self::Future {
-        let mut cloned = self.clone();
+        let mut cloned = std::mem::replace(self, self.clone());
 
         Box::pin(async move {
-            std::future::poll_fn(|cx| cloned.poll_ready(cx)).await?;
-
             let req = {
                 let (parts, body) = req.into_parts();
                 cloned.settings.set_request(&parts);
