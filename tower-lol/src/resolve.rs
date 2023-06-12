@@ -1,4 +1,4 @@
-//! TODO
+//! Middleware that resolves stored requests.
 
 use bytes::{BufMut, Bytes, BytesMut};
 use http::{Request, Response};
@@ -6,14 +6,14 @@ use std::collections::HashMap;
 use std::future::Future;
 use tower::{Layer, Service};
 
-/// TODO
+/// Newtype wrapper to hold responses in [`http::Extensions`].
 pub struct ResolveContext {
-    /// TODO
+    /// Map of response entries.
     pub entries: std::collections::HashMap<String, Option<Bytes>>,
 }
 
 impl ResolveContext {
-    /// TODO
+    /// Create a new [`ResolveContext`] with no entries.
     pub fn new() -> Self {
         Self {
             entries: HashMap::new(),
@@ -27,12 +27,12 @@ impl Default for ResolveContext {
     }
 }
 
-/// TODO
+/// Layer to apply [`ResolveService`] middleware
 #[derive(Debug, Clone)]
 pub struct ResolveLayer {}
 
 impl ResolveLayer {
-    /// TODO
+    /// Create a new [`ResolveLayer`].
     pub fn new() -> Self {
         Self {}
     }
@@ -52,14 +52,14 @@ impl<S> Layer<S> for ResolveLayer {
     }
 }
 
+/// Middleware that resolves stored requests.
 #[derive(Debug, Clone)]
-/// TODO
 pub struct ResolveService<S> {
     inner: S,
 }
 
 impl<S> ResolveService<S> {
-    /// TODO
+    /// Create a new [`ResolveService`] middleware.
     pub fn new(inner: S) -> Self {
         Self { inner }
     }

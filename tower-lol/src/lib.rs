@@ -1,4 +1,4 @@
-//! A middleware for rewriting HTML using [`tower`] and [`lol_html`].
+//! Middlewares for rewriting HTML using [`tower`] and [`lol_html`].
 //!
 //! The current interface is both unstable AND moderately unsafe.
 //! Please do not use this crate directly until it has a

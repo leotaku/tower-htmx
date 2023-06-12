@@ -1,4 +1,6 @@
-//! TODO
+//! Middlewares for building sites using [`htmx`] and [`tower`].
+//!
+//! [`htmx`]: https://htmx.org/reference/
 
 #![forbid(unsafe_code, unused_unsafe)]
 #![warn(clippy::all, missing_docs, nonstandard_style, future_incompatible)]
@@ -14,21 +16,21 @@ use tower::{Layer, Service};
 use tower_lol::resolve::ResolveService;
 use tower_lol::rewriter::HtmlRewriterService;
 
-/// TODO
+/// Layer to apply [`TemplateService`] middleware.
 #[derive(Debug, Clone)]
 pub struct TemplateLayer {
     attribute_name: String,
 }
 
 impl TemplateLayer {
-    /// TODO
+    /// Create a new [`TemplateLayer`].
     pub fn new() -> Self {
         Self {
             attribute_name: "hx-get".to_owned(),
         }
     }
 
-    /// TODO
+    /// Set a custom attribute name for extracting the target part.
     pub fn attribute<T: Into<String>>(self, attribute_name: T) -> Self {
         #[allow(clippy::needless_update)]
         Self {
@@ -55,14 +57,14 @@ impl<S> Layer<S> for TemplateLayer {
 type InnerTemplateService<S> =
     HtmlRewriterService<InsertSettings, ResolveService<HtmlRewriterService<ExtractSettings, S>>>;
 
-/// TODO
+/// Middleware that templates a HTML document.
 #[derive(Debug, Clone)]
 pub struct TemplateService<S> {
     inner: InnerTemplateService<S>,
 }
 
 impl<S> TemplateService<S> {
-    /// TODO
+    /// Create a new [`TemplateService`] middleware.
     pub fn new(inner: S, attribute_name: String) -> Self {
         let extract_svc =
             HtmlRewriterService::new(inner, ExtractSettings::new(attribute_name.clone()));
@@ -96,21 +98,21 @@ where
     }
 }
 
-/// TODO
+/// Layer to apply [`SubsetService`] middleware.
 #[derive(Debug, Clone)]
 pub struct SubsetLayer {
     query_name: String,
 }
 
 impl SubsetLayer {
-    /// TODO
+    /// Create a new [`SubsetLayer`].
     pub fn new() -> Self {
         Self {
             query_name: "hx-select".to_owned(),
         }
     }
 
-    /// TODO
+    /// Set a custom query key for extracting the CSS selector.
     pub fn query<T: Into<String>>(self, query_name: T) -> Self {
         #[allow(clippy::needless_update)]
         Self {
@@ -136,14 +138,14 @@ impl<S> Layer<S> for SubsetLayer {
 
 type InnerSubsetService<S> = HtmlRewriterService<SubsetSettings, S>;
 
-/// TODO
+/// Middleware that selects a subset of HTML based on a query.
 #[derive(Debug, Clone)]
 pub struct SubsetService<S> {
     inner: InnerSubsetService<S>,
 }
 
 impl<S> SubsetService<S> {
-    /// TODO
+    /// Create a new [`SubsetService`] middleware.
     pub fn new(inner: S, attribute_name: String) -> Self {
         let subset_svc = HtmlRewriterService::new(inner, SubsetSettings::new(attribute_name));
 

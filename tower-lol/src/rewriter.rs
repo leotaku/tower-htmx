@@ -1,4 +1,4 @@
-//! TODO
+//! Middleware that modifies HTML in-flight.
 
 use crate::util::{EitherError, UnsafeSend};
 use bytes::{Buf, Bytes, BytesMut};
@@ -13,25 +13,32 @@ use std::pin::Pin;
 use std::task::{Context, Poll};
 use tower::{Layer, Service};
 
-/// TODO
+/// Trait that provides [`Settings`] values to middlewares.
+///
+/// The structure of this trait makes it possible for settings to be based on
+/// both http request and response metadata.
+///
+/// Additionally, the resulting settings may have mutable access to the provided
+/// response metdata.  This makes it possible for settings callbacks to modify
+/// said response metadata in addition to the response body.
 pub trait SettingsProvider {
-    /// TODO
+    /// Handle http request metadata by storing any required data.
     fn set_request(&mut self, req: &http::request::Parts);
-    /// TODO
+    /// Handle http response metadata by returning some dependent settings.
     fn provide<'b, 'a: 'b>(
         &mut self,
         res: &'a mut http::response::Parts,
     ) -> Option<Settings<'b, 'static>>;
 }
 
-/// TODO
+/// Layer to apply [`HtmlRewriterService`] middleware.
 #[derive(Debug, Clone)]
 pub struct HtmlRewriterLayer<C> {
     settings: C,
 }
 
 impl<C> HtmlRewriterLayer<C> {
-    /// TODO
+    /// Create a new [`HtmlRewriterLayer`].
     pub fn new(settings: C) -> Self {
         Self { settings }
     }
@@ -45,7 +52,7 @@ impl<S, C: Clone> Layer<S> for HtmlRewriterLayer<C> {
     }
 }
 
-/// TODO
+/// Middleware that modifies HTML in-flight.
 #[derive(Clone, Debug)]
 pub struct HtmlRewriterService<C, S> {
     settings: C,
@@ -53,7 +60,7 @@ pub struct HtmlRewriterService<C, S> {
 }
 
 impl<C, S> HtmlRewriterService<C, S> {
-    /// TODO
+    /// Create a new [`HtmlRewriterService`] middleware.
     pub fn new(inner: S, settings: C) -> Self {
         Self { inner, settings }
     }
