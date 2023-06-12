@@ -178,9 +178,11 @@ fn get_query_string(el: &Element, attr: &str) -> String {
     let mut path = el.get_attribute(attr).expect("attr was required");
 
     if let Some(query) = el.get_attribute("hx-select") {
-        path += "?hx-select=";
-        path += &percent_encoding::utf8_percent_encode(&query, &percent_encoding::NON_ALPHANUMERIC)
-            .to_string();
+        path.push_str("?hx-select=");
+        path.extend(percent_encoding::utf8_percent_encode(
+            &query,
+            percent_encoding::NON_ALPHANUMERIC,
+        ))
     }
 
     path
