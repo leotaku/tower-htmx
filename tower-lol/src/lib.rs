@@ -10,14 +10,13 @@ mod resolve;
 mod rewriter;
 mod util;
 
-use std::error::Error;
-
 use bytes::Bytes;
 use http::{Request, Response};
 use http_body::Body;
 use presets::{ExtractSettings, InsertSettings, SubsetSettings};
 use resolve::ResolveService;
 use rewriter::HtmlRewriterService;
+use std::error::Error;
 use tower::{Layer, Service};
 
 /// TODO

@@ -1,6 +1,6 @@
-use std::{error::Error, fmt::Display};
-
 use bytes::Buf;
+use std::error::Error;
+use std::fmt::Display;
 
 pin_project_lite::pin_project! {
     #[project = EitherBodyProj]

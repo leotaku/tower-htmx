@@ -1,19 +1,15 @@
-use crate::{
-    either::EitherBody,
-    util::{ErrorBody, UnsafeSend},
-};
-
-use std::{
-    error::Error,
-    future::Future,
-    pin::Pin,
-    task::{Context, Poll},
-};
-
+use crate::either::EitherBody;
+use crate::util::{ErrorBody, UnsafeSend};
 use bytes::{Buf, Bytes, BytesMut};
-use http::{header::Entry, Request, Response};
+use http::header::Entry;
+use http::{Request, Response};
 use http_body::{Body, Full};
-use lol_html::{errors::RewritingError, HtmlRewriter, Settings};
+use lol_html::errors::RewritingError;
+use lol_html::{HtmlRewriter, Settings};
+use std::error::Error;
+use std::future::Future;
+use std::pin::Pin;
+use std::task::{Context, Poll};
 use tower::{Layer, Service};
 
 pub trait SettingsProvider {
