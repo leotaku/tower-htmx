@@ -1,7 +1,6 @@
 //! TODO
 
 #![feature(type_alias_impl_trait)]
-
 #![forbid(unused_unsafe)]
 #![warn(clippy::all, missing_docs, nonstandard_style, future_incompatible)]
 #![allow(clippy::type_complexity)]
@@ -12,7 +11,6 @@ mod resolve;
 mod rewriter;
 mod util;
 
-use bytes::Bytes;
 use http::{Request, Response};
 use http_body::Body;
 use presets::{ExtractSettings, InsertSettings, SubsetSettings};
