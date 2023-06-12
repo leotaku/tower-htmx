@@ -1,6 +1,5 @@
 //! TODO
 
-#![feature(type_alias_impl_trait)]
 #![forbid(unsafe_code, unused_unsafe)]
 #![warn(clippy::all, missing_docs, nonstandard_style, future_incompatible)]
 #![allow(clippy::type_complexity)]
