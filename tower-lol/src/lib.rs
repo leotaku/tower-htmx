@@ -4,7 +4,7 @@
 //! Please do not use this crate directly until it has a
 //! non-prerelease version!
 
-#![feature(type_alias_impl_trait)]
+#![feature(impl_trait_in_assoc_type)]
 #![forbid(unused_unsafe)]
 #![warn(clippy::all, missing_docs, nonstandard_style, future_incompatible)]
 #![allow(clippy::type_complexity)]
