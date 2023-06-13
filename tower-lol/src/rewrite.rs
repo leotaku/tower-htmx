@@ -99,8 +99,8 @@ where
             };
 
             let body = match provide_settings(&mut cloned.settings, &mut parts) {
-                Some(settings) => HtmlRewriteBody::new(body, settings).await,
-                None => HtmlRewriteBody::passthrough(body),
+                Some(settings) => HtmlRewriteBody::new(body).try_rewrite(settings).await,
+                None => HtmlRewriteBody::new(body),
             };
 
             if let Entry::Occupied(mut entry) = parts.headers.entry(http::header::CONTENT_LENGTH) {
@@ -114,11 +114,24 @@ where
 
 pin_project_lite::pin_project! {
     #[doc(hidden)]
-    pub struct HtmlRewriteBody<B, E> {
-        #[pin]
-        inner: B,
-        error: Option<E>,
-        rewritten: Option<Option<Bytes>>,
+    #[project = HtmlRewriteBodyProj]
+    pub enum HtmlRewriteBody<B, E> {
+        Normal { #[pin] inner: B },
+        Rewritten { rewritten: Option<Bytes> },
+        Err { error: Option<E> }
+    }
+}
+
+impl<B, E> HtmlRewriteBody<B, E> {
+    fn new(body: B) -> Self {
+        Self::Normal { inner: body }
+    }
+
+    fn len(&self) -> Option<usize> {
+        match self {
+            Self::Rewritten { rewritten } => rewritten.as_ref().map(|data| data.len()),
+            _ => None,
+        }
     }
 }
 
@@ -127,33 +140,18 @@ where
     B: http_body::Body + Unpin,
     B::Error: Error + Send + Sync + 'static,
 {
-    async fn new<'a>(mut body: B, settings: UnsafeSend<Settings<'a, 'static>>) -> Self {
+    async fn try_rewrite<'a>(self, settings: UnsafeSend<Settings<'a, 'static>>) -> Self {
+        let mut body = match self {
+            HtmlRewriteBody::Normal { inner } => inner,
+            _ => return self,
+        };
+
         match handle_rewrite(settings, Pin::new(&mut body)).await {
-            Ok(rewritten) => Self {
-                inner: body,
-                rewritten: Some(Some(rewritten.into())),
-                error: None,
+            Ok(rewritten) => Self::Rewritten {
+                rewritten: Some(rewritten.into()),
             },
-            Err(error) => Self {
-                inner: body,
-                rewritten: None,
-                error: Some(error),
-            },
+            Err(error) => Self::Err { error: Some(error) },
         }
-    }
-}
-
-impl<B, E> HtmlRewriteBody<B, E> {
-    fn passthrough(body: B) -> Self {
-        Self {
-            inner: body,
-            error: None,
-            rewritten: None,
-        }
-    }
-
-    fn len(&self) -> Option<usize> {
-        Some(self.rewritten.as_ref()?.as_ref()?.len())
     }
 }
 
@@ -169,18 +167,19 @@ where
         cx: &mut Context<'_>,
     ) -> Poll<Option<Result<Self::Data, Self::Error>>> {
         let this = self.project();
-        if let Some(err) = this.error.take() {
-            return Poll::Ready(Some(Err(EitherError::A(err))));
+        match this {
+            HtmlRewriteBodyProj::Normal { inner } => inner
+                .poll_data(cx)
+                .map_ok(|mut chunk| chunk.copy_to_bytes(chunk.remaining()))
+                .map_err(EitherError::B),
+            HtmlRewriteBodyProj::Rewritten { rewritten } => {
+                Poll::Ready(Ok(rewritten.take()).transpose())
+            }
+            HtmlRewriteBodyProj::Err { error } => match error.take() {
+                Some(error) => Poll::Ready(Some(Err(EitherError::A(error)))),
+                None => Poll::Ready(None),
+            },
         }
-
-        if let Some(rewritten) = this.rewritten.as_mut() {
-            return Poll::Ready(Ok(rewritten.take()).transpose());
-        }
-
-        this.inner
-            .poll_data(cx)
-            .map_ok(|mut chunk| chunk.copy_to_bytes(chunk.remaining()))
-            .map_err(EitherError::B)
     }
 
     fn poll_trailers(
@@ -188,7 +187,11 @@ where
         cx: &mut Context<'_>,
     ) -> Poll<Result<Option<http::HeaderMap>, Self::Error>> {
         let this = self.project();
-        this.inner.poll_trailers(cx).map_err(EitherError::B)
+        if let HtmlRewriteBodyProj::Normal { inner } = this {
+            inner.poll_trailers(cx).map_err(EitherError::B)
+        } else {
+            Poll::Ready(Ok(None))
+        }
     }
 }
 
