@@ -10,7 +10,7 @@ mod presets;
 
 use http::{Request, Response};
 use http_body::Body;
-use presets::{ExtractSettings, InsertSettings, SubsetSettings};
+use presets::{ExtractSettings, InsertSettings, SelectSettings};
 use std::error::Error;
 use tower::{Layer, Service};
 use tower_lol::resolve::ResolveService;
@@ -98,14 +98,14 @@ where
     }
 }
 
-/// Layer to apply [`SubsetService`] middleware.
+/// Layer to apply [`SelectService`] middleware.
 #[derive(Debug, Clone)]
-pub struct SubsetLayer {
+pub struct SelectLayer {
     query_name: String,
 }
 
-impl SubsetLayer {
-    /// Create a new [`SubsetLayer`].
+impl SelectLayer {
+    /// Create a new [`SelectLayer`].
     pub fn new() -> Self {
         Self {
             query_name: "hx-select".to_owned(),
@@ -122,47 +122,47 @@ impl SubsetLayer {
     }
 }
 
-impl Default for SubsetLayer {
+impl Default for SelectLayer {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl<S> Layer<S> for SubsetLayer {
-    type Service = SubsetService<S>;
+impl<S> Layer<S> for SelectLayer {
+    type Service = SelectService<S>;
 
     fn layer(&self, inner: S) -> Self::Service {
-        SubsetService::new(inner, self.query_name.clone())
+        SelectService::new(inner, self.query_name.clone())
     }
 }
 
-type InnerSubsetService<S> = HtmlRewriteService<SubsetSettings, S>;
+type InnerSelectService<S> = HtmlRewriteService<SelectSettings, S>;
 
 /// Middleware that selects a subset of HTML based on a query.
 #[derive(Debug, Clone)]
-pub struct SubsetService<S> {
-    inner: InnerSubsetService<S>,
+pub struct SelectService<S> {
+    inner: InnerSelectService<S>,
 }
 
-impl<S> SubsetService<S> {
-    /// Create a new [`SubsetService`] middleware.
+impl<S> SelectService<S> {
+    /// Create a new [`SelectService`] middleware.
     pub fn new(inner: S, attribute_name: String) -> Self {
-        let subset_svc = HtmlRewriteService::new(inner, SubsetSettings::new(attribute_name));
+        let subset_svc = HtmlRewriteService::new(inner, SelectSettings::new(attribute_name));
 
         Self { inner: subset_svc }
     }
 }
 
-impl<S, ReqBody, ResBody> Service<Request<ReqBody>> for SubsetService<S>
+impl<S, ReqBody, ResBody> Service<Request<ReqBody>> for SelectService<S>
 where
     S: Service<Request<ReqBody>, Response = Response<ResBody>> + Clone,
     ReqBody: Body + Default,
     ResBody: Body + Unpin,
     ResBody::Error: Error + Send + Sync + 'static,
 {
-    type Response = <InnerSubsetService<S> as Service<Request<ReqBody>>>::Response;
-    type Error = <InnerSubsetService<S> as Service<Request<ReqBody>>>::Error;
-    type Future = <InnerSubsetService<S> as Service<Request<ReqBody>>>::Future;
+    type Response = <InnerSelectService<S> as Service<Request<ReqBody>>>::Response;
+    type Error = <InnerSelectService<S> as Service<Request<ReqBody>>>::Error;
+    type Future = <InnerSelectService<S> as Service<Request<ReqBody>>>::Future;
 
     fn poll_ready(
         &mut self,

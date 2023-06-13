@@ -1,7 +1,7 @@
 #![feature(closure_lifetime_binder)]
 
 use axum::Router;
-use tower_htmx::{SubsetLayer, TemplateLayer};
+use tower_htmx::{SelectLayer, TemplateLayer};
 use tower_http::services::ServeDir;
 
 #[tokio::main]
@@ -10,7 +10,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let app = Router::new()
         .nest_service("/", ServeDir::new("."))
-        .layer(SubsetLayer::new())
+        .layer(SelectLayer::new())
         .layer(TemplateLayer::new());
 
     let addr = ([0, 0, 0, 0], 8080).into();

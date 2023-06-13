@@ -93,12 +93,12 @@ impl SettingsProvider for InsertSettings {
 }
 
 #[derive(Debug, Clone)]
-pub struct SubsetSettings {
+pub struct SelectSettings {
     attribute_name: String,
     selector: Option<String>,
 }
 
-impl SubsetSettings {
+impl SelectSettings {
     pub fn new(attribute_name: String) -> Self {
         Self {
             attribute_name,
@@ -107,9 +107,9 @@ impl SubsetSettings {
     }
 }
 
-impl SettingsProvider for SubsetSettings {
+impl SettingsProvider for SelectSettings {
     fn handle_request(&mut self, req: &http::request::Parts) {
-        fn inner(this: &mut SubsetSettings, req: &http::request::Parts) -> Option<String> {
+        fn inner(this: &mut SelectSettings, req: &http::request::Parts) -> Option<String> {
             let url = form_urlencoded::parse(req.uri.query()?.as_bytes());
             let query: HashMap<Cow<'_, str>, Cow<'_, str>> = url.collect();
             let selector = query.get(this.attribute_name.as_str())?;
