@@ -8,10 +8,11 @@
 
 mod presets;
 
+use std::error::Error;
+
 use http::{Request, Response};
 use http_body::Body;
 use presets::{ExtractSettings, InsertSettings, SelectSettings};
-use std::error::Error;
 use tower::{Layer, Service};
 use tower_lol::resolve::ResolveService;
 use tower_lol::rewrite::HtmlRewriteService;

@@ -1,17 +1,19 @@
 //! Middleware that modifies HTML in-flight.
 
-use crate::util::{EitherError, UnsafeSend};
+use std::error::Error;
+use std::future::Future;
+use std::pin::Pin;
+use std::task::{Context, Poll};
+
 use bytes::{Buf, Bytes, BytesMut};
 use http::header::Entry;
 use http::{Request, Response};
 use http_body::Body;
 use lol_html::errors::RewritingError;
 use lol_html::{HtmlRewriter, Settings};
-use std::error::Error;
-use std::future::Future;
-use std::pin::Pin;
-use std::task::{Context, Poll};
 use tower::{Layer, Service};
+
+use crate::util::{EitherError, UnsafeSend};
 
 /// Trait that provides [`Settings`] values to middlewares.
 ///

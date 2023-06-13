@@ -1,9 +1,10 @@
 //! Middleware that resolves stored requests.
 
-use bytes::{BufMut, Bytes, BytesMut};
-use http::{Request, Response};
 use std::collections::HashMap;
 use std::future::Future;
+
+use bytes::{BufMut, Bytes, BytesMut};
+use http::{Request, Response};
 use tower::{Layer, Service};
 
 /// Newtype wrapper to hold responses in [`http::Extensions`].
