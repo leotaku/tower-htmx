@@ -3,11 +3,12 @@ use std::fmt::Display;
 
 pub struct UnsafeSend<T> {
     pub inner: T,
+    _private: (),
 }
 
 impl<T> UnsafeSend<T> {
     pub unsafe fn new(inner: T) -> Self {
-        Self { inner }
+        Self { inner, _private: () }
     }
 }
 
