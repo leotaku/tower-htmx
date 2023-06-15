@@ -19,25 +19,12 @@ use tower_lol::rewrite::HtmlRewriteService;
 
 /// Layer to apply [`TemplateService`] middleware.
 #[derive(Debug, Clone)]
-pub struct TemplateLayer {
-    attribute_name: String,
-}
+pub struct TemplateLayer {}
 
 impl TemplateLayer {
     /// Create a new [`TemplateLayer`].
     pub fn new() -> Self {
-        Self {
-            attribute_name: "hx-get".to_owned(),
-        }
-    }
-
-    /// Set a custom attribute name for extracting the target part.
-    pub fn attribute<T: Into<String>>(self, attribute_name: T) -> Self {
-        #[allow(clippy::needless_update)]
-        Self {
-            attribute_name: attribute_name.into(),
-            ..self
-        }
+        Self {}
     }
 }
 
@@ -51,7 +38,7 @@ impl<S> Layer<S> for TemplateLayer {
     type Service = TemplateService<S>;
 
     fn layer(&self, inner: S) -> Self::Service {
-        TemplateService::new(inner, self.attribute_name.clone())
+        TemplateService::new(inner)
     }
 }
 
@@ -66,11 +53,10 @@ pub struct TemplateService<S> {
 
 impl<S> TemplateService<S> {
     /// Create a new [`TemplateService`] middleware.
-    pub fn new(inner: S, attribute_name: String) -> Self {
-        let extract_svc =
-            HtmlRewriteService::new(inner, ExtractSettings::new(attribute_name.clone()));
+    pub fn new(inner: S) -> Self {
+        let extract_svc = HtmlRewriteService::new(inner, ExtractSettings::new());
         let resolve_svc = ResolveService::new(extract_svc);
-        let inject_svc = HtmlRewriteService::new(resolve_svc, InsertSettings::new(attribute_name));
+        let inject_svc = HtmlRewriteService::new(resolve_svc, InsertSettings::new());
 
         Self { inner: inject_svc }
     }
@@ -101,25 +87,12 @@ where
 
 /// Layer to apply [`SelectService`] middleware.
 #[derive(Debug, Clone)]
-pub struct SelectLayer {
-    query_name: String,
-}
+pub struct SelectLayer {}
 
 impl SelectLayer {
     /// Create a new [`SelectLayer`].
     pub fn new() -> Self {
-        Self {
-            query_name: "hx-select".to_owned(),
-        }
-    }
-
-    /// Set a custom query key for extracting the CSS selector.
-    pub fn query<T: Into<String>>(self, query_name: T) -> Self {
-        #[allow(clippy::needless_update)]
-        Self {
-            query_name: query_name.into(),
-            ..self
-        }
+        Self {}
     }
 }
 
@@ -133,7 +106,7 @@ impl<S> Layer<S> for SelectLayer {
     type Service = SelectService<S>;
 
     fn layer(&self, inner: S) -> Self::Service {
-        SelectService::new(inner, self.query_name.clone())
+        SelectService::new(inner)
     }
 }
 
@@ -147,8 +120,8 @@ pub struct SelectService<S> {
 
 impl<S> SelectService<S> {
     /// Create a new [`SelectService`] middleware.
-    pub fn new(inner: S, attribute_name: String) -> Self {
-        let subset_svc = HtmlRewriteService::new(inner, SelectSettings::new(attribute_name));
+    pub fn new(inner: S) -> Self {
+        let subset_svc = HtmlRewriteService::new(inner, SelectSettings::new());
 
         Self { inner: subset_svc }
     }

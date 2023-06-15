@@ -8,13 +8,11 @@ use tower_lol::resolve::ResolveContext;
 use tower_lol::rewrite::SettingsProvider;
 
 #[derive(Debug, Clone)]
-pub struct ExtractSettings {
-    attribute_name: String,
-}
+pub struct ExtractSettings {}
 
 impl ExtractSettings {
-    pub fn new(attribute_name: String) -> Self {
-        Self { attribute_name }
+    pub fn new() -> Self {
+        Self {}
     }
 }
 
@@ -27,11 +25,10 @@ impl SettingsProvider for ExtractSettings {
     ) -> Option<Settings<'b, 'static>> {
         res.extensions.insert(ResolveContext::new());
         let map = res.extensions.get_mut::<ResolveContext>().unwrap();
-        let attr = self.attribute_name.clone();
 
         Some(Settings {
-            element_content_handlers: vec![lol_html::element!(format!("[{attr}]"), move |el| {
-                let path = get_query_string(el, &attr);
+            element_content_handlers: vec![lol_html::element!("[hx-get]", move |el| {
+                let path = get_query_string(el, "hx-get");
                 map.entries.insert(path, None);
 
                 Ok(())
@@ -42,13 +39,11 @@ impl SettingsProvider for ExtractSettings {
 }
 
 #[derive(Debug, Clone)]
-pub struct InsertSettings {
-    attribute_name: String,
-}
+pub struct InsertSettings {}
 
 impl InsertSettings {
-    pub fn new(attribute_name: String) -> Self {
-        Self { attribute_name }
+    pub fn new() -> Self {
+        Self {}
     }
 }
 
@@ -60,11 +55,10 @@ impl SettingsProvider for InsertSettings {
         res: &'a mut http::response::Parts,
     ) -> Option<Settings<'b, 'static>> {
         let map = res.extensions.remove::<ResolveContext>().unwrap();
-        let attr = self.attribute_name.clone();
 
         Some(Settings {
-            element_content_handlers: vec![lol_html::element!(format!("[{attr}]"), move |el| {
-                let attr = get_query_string(el, &attr);
+            element_content_handlers: vec![lol_html::element!("[hx-get]", move |el| {
+                let attr = get_query_string(el, "hx-get");
                 let content = std::str::from_utf8(
                     map.entries
                         .get(&attr)
@@ -95,25 +89,21 @@ impl SettingsProvider for InsertSettings {
 
 #[derive(Debug, Clone)]
 pub struct SelectSettings {
-    attribute_name: String,
     selector: Option<String>,
 }
 
 impl SelectSettings {
-    pub fn new(attribute_name: String) -> Self {
-        Self {
-            attribute_name,
-            selector: None,
-        }
+    pub fn new() -> Self {
+        Self { selector: None }
     }
 }
 
 impl SettingsProvider for SelectSettings {
     fn handle_request(&mut self, req: &http::request::Parts) {
-        fn inner(this: &mut SelectSettings, req: &http::request::Parts) -> Option<String> {
+        fn inner(req: &http::request::Parts) -> Option<String> {
             let url = form_urlencoded::parse(req.uri.query()?.as_bytes());
             let query: HashMap<Cow<'_, str>, Cow<'_, str>> = url.collect();
-            let selector = query.get(this.attribute_name.as_str())?;
+            let selector = query.get("hx-select")?;
 
             selector
                 .is_empty()
@@ -121,7 +111,7 @@ impl SettingsProvider for SelectSettings {
                 .then(|| format!("{selector}, {selector} *",))
         }
 
-        self.selector = inner(self, req);
+        self.selector = inner(req);
     }
 
     fn handle_response<'b, 'a: 'b>(
