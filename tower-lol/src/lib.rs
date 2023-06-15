@@ -14,5 +14,3 @@ pub mod rewrite;
 mod util;
 
 pub use lol_html;
-pub use resolve::{ResolveLayer, ResolveService};
-pub use rewrite::{HtmlRewriteLayer, HtmlRewriteService};
