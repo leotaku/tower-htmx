@@ -72,7 +72,15 @@ impl SettingsProvider for InsertSettings {
                             .body(),
                     )?;
 
-                    let ct = lol_html::html_content::ContentType::Html;
+                    let response_is_html = res
+                        .headers
+                        .get(http::header::CONTENT_TYPE)
+                        .map(|it| it.as_ref().starts_with(b"text/html"))
+                        .unwrap_or(false);
+
+                    let ct = response_is_html
+                        .then_some(lol_html::html_content::ContentType::Html)
+                        .unwrap_or(lol_html::html_content::ContentType::Text);
 
                     match el.get_attribute("hx-swap").as_deref() {
                         None | Some("innerHTML") => el.set_inner_content(content, ct),
