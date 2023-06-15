@@ -27,12 +27,15 @@ impl SettingsProvider for ExtractSettings {
         let map = res.extensions.get_mut::<ResolveContext>().unwrap();
 
         Some(Settings {
-            element_content_handlers: vec![lol_html::element!("[hx-get]", move |el| {
-                let path = get_query_string(el, "hx-get");
-                map.entries.insert(path, None);
+            element_content_handlers: vec![lol_html::element!(
+                r#"[hx-get][hx-trigger~="server"]"#,
+                move |el| {
+                    let path = get_query_string(el, "hx-get");
+                    map.entries.insert(path, None);
 
-                Ok(())
-            })],
+                    Ok(())
+                }
+            )],
             ..Settings::default()
         })
     }
@@ -57,31 +60,34 @@ impl SettingsProvider for InsertSettings {
         let map = res.extensions.remove::<ResolveContext>().unwrap();
 
         Some(Settings {
-            element_content_handlers: vec![lol_html::element!("[hx-get]", move |el| {
-                let attr = get_query_string(el, "hx-get");
-                let content = std::str::from_utf8(
-                    map.entries
-                        .get(&attr)
-                        .and_then(|it| it.as_ref())
-                        .ok_or("problem with inner content")?
-                        .body(),
-                )?;
+            element_content_handlers: vec![lol_html::element!(
+                r#"[hx-get][hx-trigger~="server"]"#,
+                move |el| {
+                    let attr = get_query_string(el, "hx-get");
+                    let content = std::str::from_utf8(
+                        map.entries
+                            .get(&attr)
+                            .and_then(|it| it.as_ref())
+                            .ok_or("problem with inner content")?
+                            .body(),
+                    )?;
 
-                let ct = lol_html::html_content::ContentType::Html;
+                    let ct = lol_html::html_content::ContentType::Html;
 
-                match el.get_attribute("hx-swap").as_deref() {
-                    None | Some("innerHTML") => el.set_inner_content(content, ct),
-                    Some("outerHTML") => el.replace(content, ct),
-                    Some("afterbegin") => el.prepend(content, ct),
-                    Some("beforebegin") => el.before(content, ct),
-                    Some("beforeend") => el.append(content, ct),
-                    Some("afterend") => el.after(content, ct),
-                    Some("delete") => el.remove(),
-                    _ => (),
+                    match el.get_attribute("hx-swap").as_deref() {
+                        None | Some("innerHTML") => el.set_inner_content(content, ct),
+                        Some("outerHTML") => el.replace(content, ct),
+                        Some("afterbegin") => el.prepend(content, ct),
+                        Some("beforebegin") => el.before(content, ct),
+                        Some("beforeend") => el.append(content, ct),
+                        Some("afterend") => el.after(content, ct),
+                        Some("delete") => el.remove(),
+                        _ => (),
+                    }
+
+                    Ok(())
                 }
-
-                Ok(())
-            })],
+            )],
             ..Settings::default()
         })
     }
