@@ -1,11 +1,10 @@
 use axum::Router;
 use tower_htmx::{SelectLayer, TemplateLayer};
 use tower_http::services::ServeDir;
+use tracing_subscriber::util::SubscriberInitExt;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    tracing_subscriber::fmt().finish();
-
     let app = Router::new()
         .nest_service("/", ServeDir::new("."))
         .layer(SelectLayer::new())
@@ -14,7 +13,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let addr = ([0, 0, 0, 0], 8080).into();
     eprintln!("listening on: http://{}/", addr);
 
-    tracing_subscriber::fmt::init();
+    tracing_subscriber::fmt().finish().init();
     axum::Server::try_bind(&addr)?
         .serve(app.into_make_service())
         .await?;
