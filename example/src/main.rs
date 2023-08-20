@@ -1,5 +1,3 @@
-#![feature(closure_lifetime_binder)]
-
 use axum::Router;
 use tower_htmx::{SelectLayer, TemplateLayer};
 use tower_http::services::ServeDir;
