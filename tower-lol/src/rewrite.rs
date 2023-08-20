@@ -86,7 +86,7 @@ where
     fn call(&mut self, req: Request<ReqBody>) -> Self::Future {
         let mut cloned = std::mem::replace(self, self.clone());
 
-        Box::pin(async move {
+        async move {
             let req = {
                 let (parts, body) = req.into_parts();
                 cloned.settings.handle_request(&parts);
@@ -108,7 +108,7 @@ where
             }
 
             Ok(Response::from_parts(parts, body))
-        })
+        }
     }
 }
 

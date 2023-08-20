@@ -87,7 +87,7 @@ where
     fn call(&mut self, req: Request<ReqBody>) -> Self::Future {
         let mut cloned = std::mem::replace(self, self.clone());
 
-        Box::pin(async move {
+        async move {
             let mut res = cloned.inner.call(req).await?;
             let ctx: &mut ResolveContext = match res.extensions_mut().get_mut() {
                 Some(some) => some,
@@ -122,6 +122,6 @@ where
             }
 
             Ok(res)
-        })
+        }
     }
 }
