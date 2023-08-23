@@ -12,10 +12,11 @@ use std::error::Error;
 
 use http::{Request, Response};
 use http_body::Body;
-use presets::{ExtractSettings, InsertSettings, SelectSettings};
 use tower::{Layer, Service};
 use tower_lol::resolve::ResolveService;
 use tower_lol::rewrite::HtmlRewriteService;
+
+use crate::presets::{ExtractSettings, InsertSettings, SelectSettings};
 
 /// Layer to apply [`TemplateService`] middleware.
 #[derive(Debug, Clone)]
