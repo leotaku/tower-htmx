@@ -12,7 +12,7 @@ fn not_htmx_predicate<T>(req: &Request<T>) -> bool {
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let app = Router::new()
-        .nest_service("/", ServeDir::new("."))
+        .nest_service("/", ServeDir::new("assets"))
         .layer(SelectLayer::new())
         .layer(TemplateLayer::new())
         .layer(LiveReloadLayer::new().request_predicate(not_htmx_predicate));
