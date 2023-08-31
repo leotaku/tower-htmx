@@ -5,12 +5,12 @@
 [![Lib.rs][librs-badge]][librs-url]
 [![Documentation][docs-badge]][docs-url]
 
-[build-url]: https://github.com/leotaku/tower-lol/actions
+[build-url]: https://github.com/leotaku/tower-htmx/actions
 [crates-url]: https://crates.io/crates/tower-lol
 [librs-url]: https://lib.rs/crates/tower-lol
 [docs-url]: https://docs.rs/tower-lol
 
-[build-badge]: https://img.shields.io/github/actions/workflow/status/leotaku/tower-lol/build.yml?branch=master
+[build-badge]: https://img.shields.io/github/actions/workflow/status/leotaku/tower-htmx/build.yml?branch=master
 [crates-badge]: https://img.shields.io/crates/v/tower-lol.svg
 [librs-badge]: https://img.shields.io/badge/lib.rs-linked-informational
 [docs-badge]: https://img.shields.io/docsrs/tower-lol

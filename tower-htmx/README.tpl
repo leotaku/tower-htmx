@@ -10,7 +10,7 @@
 [librs-url]: https://lib.rs/crates/tower-htmx
 [docs-url]: https://docs.rs/tower-htmx
 
-[build-badge]: https://img.shields.io/github/actions/workflow/status/leotaku/tower-lol/build.yml?branch=master
+[build-badge]: https://img.shields.io/github/actions/workflow/status/leotaku/tower-htmx/build.yml?branch=master
 [crates-badge]: https://img.shields.io/crates/v/tower-htmx.svg
 [librs-badge]: https://img.shields.io/badge/lib.rs-linked-informational
 [docs-badge]: https://img.shields.io/docsrs/tower-htmx
