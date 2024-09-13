@@ -8,7 +8,7 @@ use std::task::{Context, Poll};
 use bytes::{Buf, Bytes, BytesMut};
 use http::header::Entry;
 use http::{Request, Response};
-use http_body::Body;
+use http_body::{Body, Frame};
 use lol_html::errors::RewritingError;
 use lol_html::{HtmlRewriter, Settings};
 use tower::{Layer, Service};
@@ -146,7 +146,7 @@ where
             _ => return self,
         };
 
-        match handle_rewrite(settings, Pin::new(&mut body)).await {
+        match handle_rewrite(settings, Pin::new(&mut body)) {
             Ok(rewritten) => Self::Rewritten {
                 rewritten: Some(rewritten.into()),
             },
@@ -162,40 +162,59 @@ where
     type Data = Bytes;
     type Error = EitherError<E, B::Error>;
 
-    fn poll_data(
+    // fn poll_data(
+    //     self: Pin<&mut Self>,
+    //     cx: &mut Context<'_>,
+    // ) -> Poll<Option<Result<Self::Data, Self::Error>>> {
+    //     let this = self.project();
+    //     match this {
+    //         HtmlRewriteBodyProj::Normal { inner } => inner
+    //             .poll_data(cx)
+    //             .map_ok(|mut chunk| chunk.copy_to_bytes(chunk.remaining()))
+    //             .map_err(EitherError::B),
+    //         HtmlRewriteBodyProj::Rewritten { rewritten } => {
+    //             Poll::Ready(Ok(rewritten.take()).transpose())
+    //         }
+    //         HtmlRewriteBodyProj::Err { error } => match error.take() {
+    //             Some(error) => Poll::Ready(Some(Err(EitherError::A(error)))),
+    //             None => Poll::Ready(None),
+    //         },
+    //     }
+    // }
+
+    // fn poll_trailers(
+    //     self: Pin<&mut Self>,
+    //     cx: &mut Context<'_>,
+    // ) -> Poll<Result<Option<http::HeaderMap>, Self::Error>> {
+    //     let this = self.project();
+    //     if let HtmlRewriteBodyProj::Normal { inner } = this {
+    //         inner.poll_trailers(cx).map_err(EitherError::B)
+    //     } else {
+    //         Poll::Ready(Ok(None))
+    //     }
+    // }
+
+    fn poll_frame(
         self: Pin<&mut Self>,
         cx: &mut Context<'_>,
-    ) -> Poll<Option<Result<Self::Data, Self::Error>>> {
+    ) -> Poll<Option<Result<Frame<Self::Data>, Self::Error>>> {
         let this = self.project();
         match this {
             HtmlRewriteBodyProj::Normal { inner } => inner
-                .poll_data(cx)
-                .map_ok(|mut chunk| chunk.copy_to_bytes(chunk.remaining()))
+                .poll_frame(cx)
+                .map_ok(|frame| frame.map_data(|mut chunk| chunk.copy_to_bytes(chunk.remaining())))
                 .map_err(EitherError::B),
             HtmlRewriteBodyProj::Rewritten { rewritten } => {
-                Poll::Ready(Ok(rewritten.take()).transpose())
+                Poll::Ready(rewritten.take().map(|it| Ok(Frame::data(it))))
             }
-            HtmlRewriteBodyProj::Err { error } => match error.take() {
-                Some(error) => Poll::Ready(Some(Err(EitherError::A(error)))),
-                None => Poll::Ready(None),
-            },
-        }
-    }
-
-    fn poll_trailers(
-        self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
-    ) -> Poll<Result<Option<http::HeaderMap>, Self::Error>> {
-        let this = self.project();
-        if let HtmlRewriteBodyProj::Normal { inner } = this {
-            inner.poll_trailers(cx).map_err(EitherError::B)
-        } else {
-            Poll::Ready(Ok(None))
+            HtmlRewriteBodyProj::Err { error } => {
+                Poll::Ready(error.take().map(|err| Err(EitherError::A(err))))
+            }
         }
     }
 }
 
-async fn handle_rewrite<'a, B>(
+fn handle_rewrite<'a, B>(
     settings: UnsafeSend<Settings<'a, 'static>>,
     mut body: Pin<&mut B>,
 ) -> Result<BytesMut, RewritingError>
@@ -210,14 +229,12 @@ where
         }))
     };
 
-    while let Some(chunk) = body
-        .data()
-        .await
-        .transpose()
-        .map_err(|err| RewritingError::ContentHandlerError(Box::new(err)))?
-    {
-        rewriter.inner.write(chunk.chunk())?
-    }
+    // while let Some(chunk) = body
+    //     .poll_frame(cx)
+    //     .map_err(|err| RewritingError::ContentHandlerError(Box::new(err)))?
+    // {
+    //     rewriter.inner.write(chunk.chunk())?
+    // }
 
     rewriter.inner.end()?;
 

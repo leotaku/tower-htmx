@@ -2,5 +2,6 @@
 with pkgs;
 stdenvNoCC.mkDerivation {
   name = "dev-shell";
-  buildInputs = [ rustup llvmPackages_latest.clang ];
+  nativeBuildInputs = [ cargo-edit cargo-readme cargo-watch rustup ];
+  buildInputs = [ llvmPackages_latest.clang pkg-config openssl ];
 }

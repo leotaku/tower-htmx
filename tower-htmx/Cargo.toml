@@ -4,9 +4,9 @@ version = "0.1.0-pre1"
 edition = "2021"
 
 [dependencies]
-form_urlencoded = "1.2.0"
-http = "0.2.9"
-http-body = "0.4.5"
-percent-encoding = "2.3.0"
-tower = "0.4.13"
+form_urlencoded = "1.2.1"
+http = "1.1.0"
+http-body = "1.0.1"
+percent-encoding = "2.3.1"
+tower = "0.5.1"
 tower-lol = { version = "0.1.0-pre1", path = "../tower-lol" }
