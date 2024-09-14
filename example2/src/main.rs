@@ -11,7 +11,7 @@ use tower_http::services::ServeDir;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let app = Router::new().nest_service("/", ServeDir::new("."));
+    let app = Router::new().nest_service("/", ServeDir::new("assets"));
     let app = app.layer(
         ServiceBuilder::new()
             .layer(HandleErrorLayer::new(
