@@ -25,6 +25,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let addr: SocketAddr = ([0, 0, 0, 0], 8080).into();
     eprintln!("listening on: http://{}/", addr);
 
+    console_subscriber::init();
     axum::serve(TcpListener::bind(addr).await?, app).await?;
 
     Ok(())
