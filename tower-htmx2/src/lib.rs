@@ -1,10 +1,13 @@
+//! Middlewares for building sites using [`htmx`] and [`tower`].
+//!
+//! [`htmx`]: https://htmx.org/reference/
+
 #![feature(impl_trait_in_assoc_type)]
 #![forbid(unused_unsafe)]
 #![warn(clippy::all, missing_docs, nonstandard_style, future_incompatible)]
 #![allow(clippy::type_complexity)]
 
-//! Foo
-
+mod error;
 mod future;
 mod sync;
 
@@ -12,15 +15,18 @@ use std::future::{poll_fn, Future};
 use std::mem;
 
 use bytes::Bytes;
+pub use error::Error;
 use http::{Request, Response, Uri};
 use http_body_util::BodyExt;
 use sync::{rewrite, scan_tags};
 use tower::{Layer, Service};
 
+/// Layer to apply [`HtmxRewriteService`] middleware.
 #[derive(Debug, Clone)]
 pub struct HtmxRewriteLayer;
 
 impl HtmxRewriteLayer {
+    /// Create a new [`HtmxRewriteLayer`].
     pub fn new() -> Self {
         HtmxRewriteLayer
     }
@@ -34,11 +40,13 @@ impl<S> Layer<S> for HtmxRewriteLayer {
     }
 }
 
+/// Middleware that .
 #[derive(Debug, Clone)]
 pub struct HtmxRewriteService<S>(S);
 
 impl<S> HtmxRewriteService<S> {
-    fn new(inner: S) -> Self {
+    /// Create a new [`HtmxRewriteService`] middleware.
+    pub fn new(inner: S) -> Self {
         HtmxRewriteService(inner)
     }
 }
@@ -50,7 +58,7 @@ where
     ResBody: http_body::Body<Data = Bytes>,
 {
     type Response = Response<http_body_util::Either<ResBody, http_body_util::Full<Bytes>>>;
-    type Error = Error<S::Error, ResBody::Error>;
+    type Error = error::Error<S::Error, ResBody::Error>;
     type Future = impl Future<Output = Result<Self::Response, Self::Error>>;
 
     fn poll_ready(
@@ -93,24 +101,8 @@ where
     }
 }
 
-#[derive(Debug)]
-pub enum Error<F, B> {
-    Future(F),
-    Body(B),
-    HTTP(http::Error),
-    Recursion,
-}
-
-impl<F, B> Error<F, B> {
-    pub fn to_html(self) -> String {
-        match self {
-            Error::Future(err) => "future error".to_owned(),
-            Error::Body(err) => "body error".to_owned(),
-            Error::HTTP(err) => "http error".to_owned(),
-            Error::Recursion => "recursion error".to_owned(),
-        }
-    }
-}
+#[derive(Debug, Clone)]
+struct RecursionProtector(usize);
 
 async fn rewrite_call<S, ReqBody, ResBody>(
     uri: &http::uri::Uri,
@@ -175,6 +167,3 @@ fn expand_uri(uri: &http::uri::Uri, path: &str) -> http::Result<http::uri::Uri> 
 
     Ok(Uri::from_parts(parts)?)
 }
-
-#[derive(Debug, Clone)]
-struct RecursionProtector(usize);
