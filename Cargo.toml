@@ -1,9 +1,6 @@
 [workspace]
 members = [
-    #"tower-lol",
-    #"tower-htmx",
-    "tower-htmx2",
-    "example2",
-    #"example"
+    "tower-htmx",
+    "example",
 ]
 resolver = "2"

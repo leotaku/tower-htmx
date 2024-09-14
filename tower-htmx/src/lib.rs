@@ -2,151 +2,168 @@
 //!
 //! [`htmx`]: https://htmx.org/reference/
 
-#![forbid(unsafe_code, unused_unsafe)]
+#![feature(impl_trait_in_assoc_type)]
+#![forbid(unused_unsafe)]
 #![warn(clippy::all, missing_docs, nonstandard_style, future_incompatible)]
 #![allow(clippy::type_complexity)]
 
-mod presets;
+mod error;
+mod future;
+mod sync;
 
-use std::error::Error;
+use std::future::{poll_fn, Future};
+use std::mem;
 
-use http::{Request, Response};
-use http_body::Body;
+use bytes::Bytes;
+pub use error::Error;
+use http::{Request, Response, Uri};
+use http_body_util::BodyExt;
+use sync::{rewrite, scan_tags};
 use tower::{Layer, Service};
-use tower_lol::resolve::ResolveService;
-use tower_lol::rewrite::HtmlRewriteService;
 
-use crate::presets::{ExtractSettings, InsertSettings, SelectSettings};
-
-/// Layer to apply [`TemplateService`] middleware.
+/// Layer to apply [`HtmxRewriteService`] middleware.
 #[derive(Debug, Clone)]
-pub struct TemplateLayer {}
+pub struct HtmxRewriteLayer;
 
-impl TemplateLayer {
-    /// Create a new [`TemplateLayer`].
+impl HtmxRewriteLayer {
+    /// Create a new [`HtmxRewriteLayer`].
     pub fn new() -> Self {
-        Self {}
+        HtmxRewriteLayer
     }
 }
 
-impl Default for TemplateLayer {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl<S> Layer<S> for TemplateLayer {
-    type Service = TemplateService<S>;
+impl<S> Layer<S> for HtmxRewriteLayer {
+    type Service = HtmxRewriteService<S>;
 
     fn layer(&self, inner: S) -> Self::Service {
-        TemplateService::new(inner)
+        HtmxRewriteService::new(inner)
     }
 }
 
-type InnerTemplateService<S> =
-    HtmlRewriteService<InsertSettings, ResolveService<HtmlRewriteService<ExtractSettings, S>>>;
-
-/// Middleware that templates a HTML document.
+/// Middleware that .
 #[derive(Debug, Clone)]
-pub struct TemplateService<S> {
-    inner: InnerTemplateService<S>,
-}
+pub struct HtmxRewriteService<S>(S);
 
-impl<S> TemplateService<S> {
-    /// Create a new [`TemplateService`] middleware.
+impl<S> HtmxRewriteService<S> {
+    /// Create a new [`HtmxRewriteService`] middleware.
     pub fn new(inner: S) -> Self {
-        let extract_svc = HtmlRewriteService::new(inner, ExtractSettings::new());
-        let resolve_svc = ResolveService::new(extract_svc);
-        let inject_svc = HtmlRewriteService::new(resolve_svc, InsertSettings::new());
-
-        Self { inner: inject_svc }
+        HtmxRewriteService(inner)
     }
 }
 
-impl<S, ReqBody, ResBody> Service<Request<ReqBody>> for TemplateService<S>
+impl<S, ReqBody, ResBody> Service<http::Request<ReqBody>> for HtmxRewriteService<S>
 where
-    S: Service<Request<ReqBody>, Response = Response<ResBody>> + Clone,
-    ReqBody: Body + Default,
-    ResBody: Body + Unpin,
-    ResBody::Error: Error + Send + Sync + 'static,
+    S: Service<http::Request<ReqBody>, Response = http::Response<ResBody>> + Clone,
+    ReqBody: Default,
+    ResBody: http_body::Body<Data = Bytes>,
 {
-    type Response = <InnerTemplateService<S> as Service<Request<ReqBody>>>::Response;
-    type Error = <InnerTemplateService<S> as Service<Request<ReqBody>>>::Error;
-    type Future = <InnerTemplateService<S> as Service<Request<ReqBody>>>::Future;
+    type Response = Response<http_body_util::Either<ResBody, http_body_util::Full<Bytes>>>;
+    type Error = error::Error<S::Error, ResBody::Error>;
+    type Future = impl Future<Output = Result<Self::Response, Self::Error>>;
 
     fn poll_ready(
         &mut self,
         cx: &mut std::task::Context<'_>,
     ) -> std::task::Poll<Result<(), Self::Error>> {
-        self.inner.poll_ready(cx)
+        self.0
+            .poll_ready(cx)
+            .map_err(|err| Error::Future(err.into()))
     }
 
-    fn call(&mut self, req: Request<ReqBody>) -> Self::Future {
-        self.inner.call(req)
+    fn call(&mut self, req: http::Request<ReqBody>) -> Self::Future {
+        if req.headers().contains_key(http::header::CONTENT_LENGTH)
+            && req
+                .headers()
+                .get(http::header::CONTENT_TYPE)
+                .and_then(|it| it.to_str().ok())
+                .is_some_and(|it| it.starts_with("text/html"))
+        {
+            let fut = self.0.call(req);
+            return future::Either::left(async move {
+                let rsp = fut.await.map_err(Error::Future)?;
+                Ok(rsp.map(http_body_util::Either::Left))
+            });
+        };
+
+        let uri = req.uri().clone();
+        let recursion_level = match req.extensions().get::<RecursionProtector>() {
+            Some(RecursionProtector(level)) => *level,
+            None => 0,
+        };
+
+        let fut = self.0.call(req);
+        let service = mem::replace(self, self.clone());
+
+        future::Either::right(Box::pin(async move {
+            let res = fut.await.map_err(Error::Future)?;
+            rewrite_call(&uri, res, service, recursion_level).await
+        }))
     }
 }
 
-/// Layer to apply [`SelectService`] middleware.
 #[derive(Debug, Clone)]
-pub struct SelectLayer {}
+struct RecursionProtector(usize);
 
-impl SelectLayer {
-    /// Create a new [`SelectLayer`].
-    pub fn new() -> Self {
-        Self {}
-    }
-}
-
-impl Default for SelectLayer {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl<S> Layer<S> for SelectLayer {
-    type Service = SelectService<S>;
-
-    fn layer(&self, inner: S) -> Self::Service {
-        SelectService::new(inner)
-    }
-}
-
-type InnerSelectService<S> = HtmlRewriteService<SelectSettings, S>;
-
-/// Middleware that selects a subset of HTML based on a query.
-#[derive(Debug, Clone)]
-pub struct SelectService<S> {
-    inner: InnerSelectService<S>,
-}
-
-impl<S> SelectService<S> {
-    /// Create a new [`SelectService`] middleware.
-    pub fn new(inner: S) -> Self {
-        let subset_svc = HtmlRewriteService::new(inner, SelectSettings::new());
-
-        Self { inner: subset_svc }
-    }
-}
-
-impl<S, ReqBody, ResBody> Service<Request<ReqBody>> for SelectService<S>
+async fn rewrite_call<S, ReqBody, ResBody>(
+    uri: &http::uri::Uri,
+    res: Response<ResBody>,
+    mut service: HtmxRewriteService<S>,
+    recursion_level: usize,
+) -> Result<
+    <HtmxRewriteService<S> as Service<http::Request<ReqBody>>>::Response,
+    Error<S::Error, ResBody::Error>,
+>
 where
-    S: Service<Request<ReqBody>, Response = Response<ResBody>> + Clone,
-    ReqBody: Body + Default,
-    ResBody: Body + Unpin,
-    ResBody::Error: Error + Send + Sync + 'static,
+    S: Service<http::Request<ReqBody>, Response = http::Response<ResBody>> + Clone,
+    ReqBody: Default,
+    ResBody: http_body::Body<Data = Bytes>,
 {
-    type Response = <InnerSelectService<S> as Service<Request<ReqBody>>>::Response;
-    type Error = <InnerSelectService<S> as Service<Request<ReqBody>>>::Error;
-    type Future = <InnerSelectService<S> as Service<Request<ReqBody>>>::Future;
-
-    fn poll_ready(
-        &mut self,
-        cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<Result<(), Self::Error>> {
-        self.inner.poll_ready(cx)
+    if recursion_level > 10 {
+        return Err(Error::Recursion);
     }
 
-    fn call(&mut self, req: Request<ReqBody>) -> Self::Future {
-        self.inner.call(req)
+    let (mut parts, body) = res.into_parts();
+    let original = body.collect().await.map_err(Error::Body)?.to_bytes();
+    let hrefs = scan_tags(&original).unwrap();
+
+    let mut resps = Vec::new();
+    for href in hrefs {
+        poll_fn(|cx| service.poll_ready(cx)).await?;
+        let req = Request::builder()
+            .method(http::method::Method::GET)
+            .uri(expand_uri(&uri, &href).map_err(Error::HTTP)?)
+            .extension(RecursionProtector(recursion_level))
+            .body(ReqBody::default())
+            .unwrap();
+
+        let (parts, body) = service.call(req).await?.into_parts();
+        let body = match body {
+            http_body_util::Either::Left(left) => left.collect().await.map_err(Error::Body)?,
+            http_body_util::Either::Right(right) => right.collect().await.expect("fuck off"),
+        };
+
+        resps.push(Response::from_parts(parts, body));
     }
+
+    let rewritten = rewrite::<ResBody::Data>(&original, resps).unwrap();
+
+    parts
+        .headers
+        .insert(http::header::CONTENT_LENGTH, rewritten.len().into());
+
+    Ok(http::Response::from_parts(
+        parts,
+        http_body_util::Either::Right(http_body_util::Full::new(rewritten)),
+    ))
+}
+
+fn expand_uri(uri: &http::uri::Uri, path: &str) -> http::Result<http::uri::Uri> {
+    let mut parts = uri.clone().into_parts();
+    parts.path_and_query = if path.starts_with("/") {
+        Some(path.try_into()?)
+    } else {
+        Some(format!("{}/{}", uri.path(), path).try_into()?)
+    };
+
+    Ok(Uri::from_parts(parts)?)
 }
