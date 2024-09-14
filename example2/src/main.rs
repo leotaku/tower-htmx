@@ -1,5 +1,3 @@
-#![feature(async_closure)]
-
 use std::net::SocketAddr;
 
 use axum::error_handling::HandleErrorLayer;
@@ -11,17 +9,13 @@ use tower::ServiceBuilder;
 use tower_htmx2::HtmxRewriteLayer;
 use tower_http::services::ServeDir;
 
-fn not_htmx_predicate<T>(req: &Request<T>) -> bool {
-    !req.headers().contains_key("hx-request")
-}
-
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let app = Router::new().nest_service("/", ServeDir::new("."));
     let app = app.layer(
         ServiceBuilder::new()
             .layer(HandleErrorLayer::new(
-                async |err: tower_htmx2::Error<_, _>| {
+                |err: tower_htmx2::Error<_, _>| async {
                     (StatusCode::INTERNAL_SERVER_ERROR, Html(err.to_html()))
                 },
             ))
@@ -31,7 +25,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let addr: SocketAddr = ([0, 0, 0, 0], 8080).into();
     eprintln!("listening on: http://{}/", addr);
 
-    console_subscriber::init();
     axum::serve(TcpListener::bind(addr).await?, app).await?;
 
     Ok(())
