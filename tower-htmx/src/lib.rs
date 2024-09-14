@@ -9,16 +9,16 @@
 
 mod error;
 mod future;
-mod sync;
+mod rewriter;
 
 use std::future::{poll_fn, Future};
 use std::mem;
 
 use bytes::Bytes;
-pub use error::Error;
-use http::{Request, Response, Uri};
+use error::{Error, HandleErrorService};
+use http::{Request, Response};
 use http_body_util::BodyExt;
-use sync::{rewrite, scan_tags};
+use rewriter::Rewriter;
 use tower::{Layer, Service};
 
 /// Layer to apply [`HtmxRewriteService`] middleware.
@@ -30,6 +30,11 @@ impl HtmxRewriteLayer {
     pub fn new() -> Self {
         HtmxRewriteLayer
     }
+
+    /// Convert this layer into a [`HtmxRewriteLayerInfallible`].
+    pub fn infallible(self) -> HtmxRewriteLayerInfallible {
+        HtmxRewriteLayerInfallible(self)
+    }
 }
 
 impl<S> Layer<S> for HtmxRewriteLayer {
@@ -37,6 +42,18 @@ impl<S> Layer<S> for HtmxRewriteLayer {
 
     fn layer(&self, inner: S) -> Self::Service {
         HtmxRewriteService::new(inner)
+    }
+}
+
+/// Layer to apply [`HtmxRewriteService`] middleware in-band error handling.
+#[derive(Debug, Clone)]
+pub struct HtmxRewriteLayerInfallible(HtmxRewriteLayer);
+
+impl<S> Layer<S> for HtmxRewriteLayerInfallible {
+    type Service = HandleErrorService<HtmxRewriteService<S>>;
+
+    fn layer(&self, inner: S) -> Self::Service {
+        HandleErrorService(self.0.layer(inner))
     }
 }
 
@@ -51,14 +68,14 @@ impl<S> HtmxRewriteService<S> {
     }
 }
 
-impl<S, ReqBody, ResBody> Service<http::Request<ReqBody>> for HtmxRewriteService<S>
+impl<S, ReqBody, ResBody> Service<Request<ReqBody>> for HtmxRewriteService<S>
 where
-    S: Service<http::Request<ReqBody>, Response = http::Response<ResBody>> + Clone,
+    S: Service<Request<ReqBody>, Response = Response<ResBody>> + Clone,
     ReqBody: Default,
     ResBody: http_body::Body<Data = Bytes>,
 {
     type Response = Response<http_body_util::Either<ResBody, http_body_util::Full<Bytes>>>;
-    type Error = error::Error<S::Error, ResBody::Error>;
+    type Error = error::Error<S::Error, ResBody::Error, lol_html::errors::RewritingError>;
     type Future = impl Future<Output = Result<Self::Response, Self::Error>>;
 
     fn poll_ready(
@@ -70,14 +87,10 @@ where
             .map_err(|err| Error::Future(err.into()))
     }
 
-    fn call(&mut self, req: http::Request<ReqBody>) -> Self::Future {
-        if req.headers().contains_key(http::header::CONTENT_LENGTH)
-            && req
-                .headers()
-                .get(http::header::CONTENT_TYPE)
-                .and_then(|it| it.to_str().ok())
-                .is_some_and(|it| it.starts_with("text/html"))
-        {
+    fn call(&mut self, req: Request<ReqBody>) -> Self::Future {
+        let mut rw = rewriter::BasicRewriter::new();
+
+        if !rw.match_request(&req) {
             let fut = self.0.call(req);
             return future::Either::left(async move {
                 let rsp = fut.await.map_err(Error::Future)?;
@@ -85,85 +98,50 @@ where
             });
         };
 
-        let uri = req.uri().clone();
-        let recursion_level = match req.extensions().get::<RecursionProtector>() {
-            Some(RecursionProtector(level)) => *level,
-            None => 0,
-        };
-
         let fut = self.0.call(req);
-        let service = mem::replace(self, self.clone());
+        let mut service = mem::replace(self, self.clone());
 
         future::Either::right(Box::pin(async move {
             let res = fut.await.map_err(Error::Future)?;
-            rewrite_call(&uri, res, service, recursion_level).await
+            if !rw.match_response(&res) {
+                return Ok(res.map(http_body_util::Either::Left));
+            };
+
+            let (mut parts, body) = res.into_parts();
+            let original = body.collect().await.map_err(Error::Body)?.to_bytes();
+            let reqs = rw.extract_info(&original).map_err(Error::Rewrite)?;
+
+            let mut resps = Vec::new();
+            for req in reqs {
+                poll_fn(|cx| service.poll_ready(cx)).await?;
+                let req = req
+                    .body(ReqBody::default())
+                    .expect("request to always be constructible");
+
+                let (parts, body) = service.call(req).await?.into_parts();
+                let body = match body {
+                    http_body_util::Either::Left(left) => {
+                        left.collect().await.map_err(Error::Body)?
+                    }
+                    http_body_util::Either::Right(right) => right
+                        .collect()
+                        .await
+                        .expect("Full body to always be collectable"),
+                };
+
+                resps.push(Response::from_parts(parts, body.to_bytes()));
+            }
+
+            let rewritten = rw.rewrite(&original, resps).map_err(Error::Rewrite)?;
+
+            parts
+                .headers
+                .insert(http::header::CONTENT_LENGTH, rewritten.len().into());
+
+            Ok(Response::from_parts(
+                parts,
+                http_body_util::Either::Right(http_body_util::Full::new(rewritten)),
+            ))
         }))
     }
-}
-
-#[derive(Debug, Clone)]
-struct RecursionProtector(usize);
-
-async fn rewrite_call<S, ReqBody, ResBody>(
-    uri: &http::uri::Uri,
-    res: Response<ResBody>,
-    mut service: HtmxRewriteService<S>,
-    recursion_level: usize,
-) -> Result<
-    <HtmxRewriteService<S> as Service<http::Request<ReqBody>>>::Response,
-    Error<S::Error, ResBody::Error>,
->
-where
-    S: Service<http::Request<ReqBody>, Response = http::Response<ResBody>> + Clone,
-    ReqBody: Default,
-    ResBody: http_body::Body<Data = Bytes>,
-{
-    if recursion_level > 10 {
-        return Err(Error::Recursion);
-    }
-
-    let (mut parts, body) = res.into_parts();
-    let original = body.collect().await.map_err(Error::Body)?.to_bytes();
-    let hrefs = scan_tags(&original).unwrap();
-
-    let mut resps = Vec::new();
-    for href in hrefs {
-        poll_fn(|cx| service.poll_ready(cx)).await?;
-        let req = Request::builder()
-            .method(http::method::Method::GET)
-            .uri(expand_uri(&uri, &href).map_err(Error::HTTP)?)
-            .extension(RecursionProtector(recursion_level))
-            .body(ReqBody::default())
-            .unwrap();
-
-        let (parts, body) = service.call(req).await?.into_parts();
-        let body = match body {
-            http_body_util::Either::Left(left) => left.collect().await.map_err(Error::Body)?,
-            http_body_util::Either::Right(right) => right.collect().await.expect("fuck off"),
-        };
-
-        resps.push(Response::from_parts(parts, body));
-    }
-
-    let rewritten = rewrite::<ResBody::Data>(&original, resps).unwrap();
-
-    parts
-        .headers
-        .insert(http::header::CONTENT_LENGTH, rewritten.len().into());
-
-    Ok(http::Response::from_parts(
-        parts,
-        http_body_util::Either::Right(http_body_util::Full::new(rewritten)),
-    ))
-}
-
-fn expand_uri(uri: &http::uri::Uri, path: &str) -> http::Result<http::uri::Uri> {
-    let mut parts = uri.clone().into_parts();
-    parts.path_and_query = if path.starts_with("/") {
-        Some(path.try_into()?)
-    } else {
-        Some(format!("{}/{}", uri.path(), path).try_into()?)
-    };
-
-    Ok(Uri::from_parts(parts)?)
 }
