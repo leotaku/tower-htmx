@@ -1,26 +1,15 @@
-<!DOCTYPE html>
+<!doctype html>
 <html>
   <head>
-    <script
-      async
-      defer
-      src="https://unpkg.com/htmx.org@1.9.2"
-      integrity="sha384-L6OqL9pRWyyFU3+/bjdSri+iIphTN/bvYyM37tICVyOJkWZLpP2vGn6VUEXgzg6h"
-      crossorigin="anonymous"
-    ></script>
+    <!-- <script src="https://unpkg.com/htmx.org@2.0.2"></script> -->
   </head>
   <body>
-    <h1>test</h1>
-    <div
-      hx-get="test.html"
-      hx-trigger="server load"
-      hx-swap="outerHTML"
-      hx-select="#target"
-    >
-      Loading...
-    </div>
-    <div hx-boost="true">
-      <a href="/test.html">Blog</a>
-    </div>
+    <header>
+      <h1>My blog</h1>
+      <a href="/">home</a>
+      <a href="/test.html?parent=/">open blogpost</a>
+    </header>
+    <main id="main" hx-get="[child]" hx-trigger="server">
+    </main>
   </body>
 </html>
