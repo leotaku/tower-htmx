@@ -18,7 +18,7 @@ use bytes::Bytes;
 use error::{Error, HandleErrorService};
 use http::{Request, Response};
 use http_body_util::BodyExt;
-use rewriter::Rewriter;
+use rewriter::{Resolvable, Rewriter};
 use tower::{Layer, Service};
 
 /// Layer to apply [`HtmxRewriteService`] middleware.
@@ -90,7 +90,8 @@ where
     fn call(&mut self, req: Request<ReqBody>) -> Self::Future {
         let mut rw = rewriter::BasicRewriter::new();
 
-        if !rw.match_request(&req) {
+        let (req, matched) = rw.match_request(req);
+        if !matched {
             let fut = self.0.call(req);
             return future::Either::left(async move {
                 let rsp = fut.await.map_err(Error::Future)?;
@@ -109,27 +110,33 @@ where
 
             let (mut parts, body) = res.into_parts();
             let original = body.collect().await.map_err(Error::Body)?.to_bytes();
-            let reqs = rw.extract_info(&original).map_err(Error::Rewrite)?;
+            let resolvables = rw.extract_info(&original).map_err(Error::Rewrite)?;
 
             let mut resps = Vec::new();
-            for req in reqs {
+            for resolvable in resolvables {
                 poll_fn(|cx| service.poll_ready(cx)).await?;
-                let req = req
-                    .body(ReqBody::default())
-                    .expect("request to always be constructible");
 
-                let (parts, body) = service.call(req).await?.into_parts();
-                let body = match body {
-                    http_body_util::Either::Left(left) => {
-                        left.collect().await.map_err(Error::Body)?
+                match resolvable {
+                    Resolvable::Req(req) => {
+                        let req = req
+                            .body(ReqBody::default())
+                            .expect("request to always be constructible");
+
+                        let (parts, body) = service.call(req).await?.into_parts();
+                        let body = match body {
+                            http_body_util::Either::Left(left) => {
+                                left.collect().await.map_err(Error::Body)?
+                            }
+                            http_body_util::Either::Right(right) => right
+                                .collect()
+                                .await
+                                .expect("Full body to always be collectable"),
+                        };
+
+                        resps.push(Response::from_parts(parts, body.to_bytes()))
                     }
-                    http_body_util::Either::Right(right) => right
-                        .collect()
-                        .await
-                        .expect("Full body to always be collectable"),
+                    Resolvable::Rsp(res) => resps.push(res),
                 };
-
-                resps.push(Response::from_parts(parts, body.to_bytes()));
             }
 
             let rewritten = rw.rewrite(&original, resps).map_err(Error::Rewrite)?;

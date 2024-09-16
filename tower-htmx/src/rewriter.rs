@@ -3,12 +3,17 @@ use http::{Request, Response, Uri};
 use lol_html::errors::RewritingError;
 use lol_html::{element, HtmlRewriter, Settings};
 
+pub(crate) enum Resolvable {
+    Req(http::request::Builder),
+    Rsp(http::response::Response<Bytes>),
+}
+
 pub(crate) trait Rewriter {
     type Error;
 
-    fn match_request<ReqBody>(&mut self, req: &Request<ReqBody>) -> bool;
+    fn match_request<ReqBody>(&mut self, req: Request<ReqBody>) -> (Request<ReqBody>, bool);
     fn match_response<ResBody>(&mut self, res: &Response<ResBody>) -> bool;
-    fn extract_info(&mut self, data: &[u8]) -> Result<Vec<http::request::Builder>, Self::Error>;
+    fn extract_info(&mut self, data: &[u8]) -> Result<Vec<Resolvable>, Self::Error>;
     fn rewrite(&mut self, data: &[u8], list: Vec<Response<Bytes>>) -> Result<Bytes, Self::Error>;
 }
 
@@ -17,6 +22,7 @@ pub(crate) struct BasicRewriter {
     base_url: Uri,
     recursion_level: usize,
     selector: String,
+    templated_child: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -28,6 +34,7 @@ impl BasicRewriter {
             base_url: Default::default(),
             recursion_level: 0,
             selector: r#"[hx-get][hx-trigger~="server"]"#.to_owned(),
+            templated_child: None,
         }
     }
 }
@@ -35,14 +42,32 @@ impl BasicRewriter {
 impl Rewriter for BasicRewriter {
     type Error = RewritingError;
 
-    fn match_request<ReqBody>(&mut self, req: &http::Request<ReqBody>) -> bool {
+    fn match_request<ReqBody>(
+        &mut self,
+        mut req: http::Request<ReqBody>,
+    ) -> (http::Request<ReqBody>, bool) {
         self.base_url = req.uri().clone();
         self.recursion_level = match req.extensions().get() {
             Some(RecursionProtector(level)) => *level + 1,
             None => 0,
         };
+        let req = match req
+            .uri()
+            .query()
+            .and_then(|it| it.rsplit_once("parent=")?.1.split(&['#', '?']).next())
+            .map(|it| it.to_owned())
+        {
+            Some(parent) => {
+                let uri = req.uri_mut();
+                self.templated_child = uri.path_and_query().map(|it| it.path().to_string());
+                *uri = expand_uri(uri, parent).unwrap();
 
-        self.recursion_level < 10
+                req
+            }
+            None => req,
+        };
+
+        (req, self.recursion_level < 10)
     }
 
     fn match_response<ResBody>(&mut self, res: &http::Response<ResBody>) -> bool {
@@ -54,18 +79,31 @@ impl Rewriter for BasicRewriter {
                 .is_some_and(|it| it.starts_with("text/html"))
     }
 
-    fn extract_info(&mut self, data: &[u8]) -> Result<Vec<http::request::Builder>, Self::Error> {
+    fn extract_info(&mut self, data: &[u8]) -> Result<Vec<Resolvable>, Self::Error> {
         let mut reqs = Vec::new();
         let mut tag_scanner = HtmlRewriter::new(
             Settings {
                 element_content_handlers: vec![element!(self.selector, |el| {
                     if let Some(href) = el.get_attribute("hx-get") {
-                        reqs.push(
-                            Request::builder()
-                                .method(http::Method::GET)
-                                .uri(expand_uri(&self.base_url, href)?)
-                                .extension(RecursionProtector(self.recursion_level)),
-                        )
+                        let reference = if href == "[child]" {
+                            self.templated_child.take()
+                        } else {
+                            Some(href)
+                        };
+
+                        reqs.push(match reference {
+                            Some(href) => Resolvable::Req(
+                                Request::builder()
+                                    .method(http::Method::GET)
+                                    .uri(expand_uri(&self.base_url, href)?)
+                                    .extension(RecursionProtector(self.recursion_level)),
+                            ),
+                            None => Resolvable::Rsp(
+                                Response::builder()
+                                    .header(http::header::CONTENT_TYPE, "text/html")
+                                    .body(Bytes::new())?,
+                            ),
+                        });
                     }
 
                     Ok(())
