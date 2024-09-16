@@ -1,3 +1,4 @@
+use std::fmt::Display;
 use std::future::Future;
 
 use bytes::Bytes;
@@ -13,13 +14,13 @@ pub enum Error<F, B, R> {
     Rewrite(R),
 }
 
-impl<F, B, R> Error<F, B, R> {
+impl<F: Display, B: Display, R: Display> Error<F, B, R> {
     /// Format the given error as HTML.
     pub fn to_html(self) -> String {
         match self {
-            Error::Future(_err) => "future error".to_owned(),
-            Error::Body(_err) => "body error".to_owned(),
-            Error::Rewrite(_err) => "recursion error".to_owned(),
+            Error::Future(err) => format!("future: {err}"),
+            Error::Body(err) => format!("future: {err}"),
+            Error::Rewrite(err) => format!("rewrite: {err}"),
         }
     }
 }
@@ -33,6 +34,7 @@ where
         + Clone,
     ReqBody: Default,
     ResBody: http_body::Body<Data = Bytes>,
+    ResBody::Error: Display,
 {
     type Response = Response<http_body_util::Either<ResBody, http_body_util::Full<Bytes>>>;
     type Error = std::convert::Infallible;
