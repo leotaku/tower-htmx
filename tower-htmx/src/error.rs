@@ -14,13 +14,12 @@ pub enum Error<F, B, R> {
     Rewrite(R),
 }
 
-impl<F: Display, B: Display, R: Display> Error<F, B, R> {
-    /// Format the given error as HTML.
-    pub fn to_html(self) -> String {
+impl<F: Display, B: Display, R: Display> Display for Error<F, B, R> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Error::Future(err) => format!("future: {err}"),
-            Error::Body(err) => format!("future: {err}"),
-            Error::Rewrite(err) => format!("rewrite: {err}"),
+            Error::Future(err) => write!(f, "future: {}", err),
+            Error::Body(err) => write!(f, "body: {}", err),
+            Error::Rewrite(err) => write!(f, "rewrite: {}", err),
         }
     }
 }
@@ -53,7 +52,7 @@ where
             match fut.await {
                 Ok(res) => Ok(res),
                 Err(err) => {
-                    let message = err.to_html();
+                    let message = err.to_string();
                     Ok(Response::builder()
                         .status(http::status::StatusCode::INTERNAL_SERVER_ERROR)
                         .header(http::header::CONTENT_TYPE, "text/html")
