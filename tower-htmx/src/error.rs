@@ -1,3 +1,4 @@
+use std::convert::Infallible;
 use std::fmt::Display;
 use std::future::Future;
 
@@ -29,14 +30,13 @@ pub struct HandleErrorService<S>(pub S);
 
 impl<S, ReqBody, ResBody> Service<Request<ReqBody>> for HandleErrorService<HtmxRewriteService<S>>
 where
-    S: Service<Request<ReqBody>, Response = Response<ResBody>, Error = std::convert::Infallible>
-        + Clone,
+    S: Service<Request<ReqBody>, Response = Response<ResBody>, Error = Infallible> + Clone,
     ReqBody: Default,
     ResBody: http_body::Body<Data = Bytes>,
     ResBody::Error: Display,
 {
     type Response = Response<http_body_util::Either<ResBody, http_body_util::Full<Bytes>>>;
-    type Error = std::convert::Infallible;
+    type Error = Infallible;
     type Future = impl Future<Output = Result<Self::Response, Self::Error>>;
 
     fn poll_ready(
