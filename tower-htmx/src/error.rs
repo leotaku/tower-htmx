@@ -60,7 +60,7 @@ where
                         .body(http_body_util::Either::Right(http_body_util::Full::from(
                             message,
                         )))
-                        .expect(""))
+                        .expect("response builder to never fail with valid inputs"))
                 }
             }
         }
