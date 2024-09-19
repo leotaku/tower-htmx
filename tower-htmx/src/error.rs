@@ -54,11 +54,11 @@ where
                 Err(err) => {
                     let message = err.to_string();
                     Ok(Response::builder()
-                        .status(http::status::StatusCode::INTERNAL_SERVER_ERROR)
+                        .status(http::StatusCode::INTERNAL_SERVER_ERROR)
                         .header(http::header::CONTENT_TYPE, "text/html")
                         .header(http::header::CONTENT_LENGTH, message.len())
-                        .body(http_body_util::Either::Right(http_body_util::Full::new(
-                            message.into(),
+                        .body(http_body_util::Either::Right(http_body_util::Full::from(
+                            message,
                         )))
                         .expect(""))
                 }
